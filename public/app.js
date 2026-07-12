@@ -10,6 +10,9 @@ const partListId = document.querySelector('#partListId');
 const setName = document.querySelector('#setName');
 const stats = document.querySelector('#stats');
 let rows = [], filter = 'all', userToken = '';
+let currentSetNum = '', currentInventory = null, panelsInitialized = false;
+const expandedPanels = new Set();
+const isLocalBrowser = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
 const pendingExtensionSync = new Map();
 
 window.addEventListener('message', event => {
@@ -22,6 +25,7 @@ window.addEventListener('message', event => {
 });
 
 function syncViaExtension(mode, url) {
+  if (!isLocalBrowser) return Promise.reject(new Error('La synchronisation Chrome se lance uniquement depuis le PC.'));
   return new Promise((resolve, reject) => {
     const requestId = `${Date.now()}-${Math.random()}`;
     pendingExtensionSync.set(requestId, { resolve, reject });
@@ -69,11 +73,20 @@ function editorHtml(part, alwaysOpen = false) {
   return `<details class="case-editor"${alwaysOpen ? ' open' : ''}><summary>${alwaysOpen ? 'Attribuer une case' : 'Changer de case'}</summary><div><input data-location-input value="${escapeHtml(part.location)}" placeholder="Ex. C2" aria-label="Numéro de case"><button type="button" data-save-location data-row-key="${escapeHtml(key)}">Enregistrer</button></div><span class="save-status" aria-live="polite"></span></details>`;
 }
 
+function coordinationHtml(part) {
+  const indicator = part.coordination || {};
+  if (indicator.both) return `<span class="coordination coordination-both">Forme complète (${indicator.colorCount} couleurs) + couleur complète (${indicator.shapeCount} formes) à cette étape</span>`;
+  const badges = [];
+  if (indicator.shapeComplete) badges.push(`<span class="coordination coordination-shape">Toutes les couleurs de cette forme (${indicator.colorCount}) à cette étape</span>`);
+  if (indicator.colorComplete) badges.push(`<span class="coordination coordination-color">Toutes les formes de cette couleur (${indicator.shapeCount}) à cette étape</span>`);
+  return badges.join('');
+}
+
 function partHtml(part, missing = false) {
   const sorting = part.sorting || LegoPlanner.pieceDifficulty(part);
-  return `<div class="part ${missing ? 'unassigned' : ''}">
-    <div class="pic">${part.part?.part_img_url ? `<img src="${escapeHtml(part.part.part_img_url)}" alt="">` : '◫'}</div>
-    <div class="part-info"><b>${escapeHtml(part.part?.name || part.part?.part_num)}</b><span>${escapeHtml(part.color?.name)} · ${escapeHtml(part.part?.part_num)}${part.bricklinkUrl ? ` · <a href="${escapeHtml(part.bricklinkUrl)}" target="_blank" rel="noreferrer">fiche BrickLink</a>` : ''}</span><span class="physical-data">${escapeHtml(physicalLabel(part))}</span><span class="difficulty difficulty-${sorting.level.toLowerCase()}">${sorting.level} · ${escapeHtml(sorting.reasons.join(', '))}</span>${editorHtml(part, missing)}</div>
+  return `<div class="part ${missing ? 'unassigned' : ''} ${part.completed ? 'completed' : ''}">
+    <div class="part-visual"><label class="done-control"><input type="checkbox" data-toggle-complete data-row-key="${escapeHtml(keyOf(part))}" ${part.completed ? 'checked' : ''}><span aria-hidden="true">✓</span><small>Rangé</small></label><div class="pic">${part.part?.part_img_url ? `<img src="${escapeHtml(part.part.part_img_url)}" alt="">` : '◫'}</div></div>
+    <div class="part-info"><b>${escapeHtml(part.part?.name || part.part?.part_num)}</b><span>${escapeHtml(part.color?.name)} · ${escapeHtml(part.part?.part_num)}${part.bricklinkUrl ? ` · <a href="${escapeHtml(part.bricklinkUrl)}" target="_blank" rel="noreferrer">fiche BrickLink</a>` : ''}</span><span class="physical-data">${escapeHtml(physicalLabel(part))}</span><span class="difficulty difficulty-${sorting.level.toLowerCase()}">${sorting.level} · ${escapeHtml(sorting.reasons.join(', '))}</span>${coordinationHtml(part)}${editorHtml(part, missing)}</div>
     <strong class="qty">× ${part.quantity}</strong>
   </div>`;
 }
@@ -82,25 +95,53 @@ function matchesSearch(part, term) {
   return [part.part?.part_num, part.part?.name, part.color?.name, part.location].join(' ').toLowerCase().includes(term);
 }
 
+const panelKeyOf = visit => `${visit.location}|${visit.visitIndex}`;
+
+function panelHtml({ key, caseClass = '', eyebrow, title, subtitle, extra = '', content, expanded }) {
+  return `<article class="group ${caseClass} ${expanded ? 'expanded' : 'collapsed'}" data-panel-key="${escapeHtml(key)}"><button type="button" class="case" data-toggle-panel data-panel-key="${escapeHtml(key)}" aria-expanded="${expanded}"><small>${eyebrow}</small><strong>${escapeHtml(title)}</strong><span>${subtitle}</span>${extra}<i class="panel-chevron" aria-hidden="true">⌄</i></button><div class="parts" ${expanded ? '' : 'hidden'}>${content}</div></article>`;
+}
+
 function render() {
   const term = document.querySelector('#search').value.toLowerCase();
-  const visibleRows = rows.filter(part => matchesSearch(part, term));
-  const plan = LegoPlanner.buildStoragePlan(visibleRows);
+  const plan = LegoPlanner.buildStoragePlan(rows);
+  if (!panelsInitialized) {
+    const firstIncomplete = plan.visits.find(visit => visit.parts.some(part => !part.completed)) || plan.visits[0];
+    if (firstIncomplete) expandedPanels.add(panelKeyOf(firstIncomplete));
+    panelsInitialized = true;
+  }
   if (filter === 'missing') {
-    groups.innerHTML = plan.missing.length ? `<article class="group missing"><div class="case"><small>À CLASSER</small><strong>Sans case</strong><span>${plan.missing.length} référence${plan.missing.length > 1 ? 's' : ''}</span></div><div class="parts">${plan.missing.map(part => partHtml(part, true)).join('')}</div></article>` : '<p class="no-result">Toutes les pièces ont une case.</p>';
+    const missing = plan.missing.filter(part => matchesSearch(part, term));
+    groups.innerHTML = missing.length ? panelHtml({ key: 'missing', caseClass: 'missing', eyebrow: 'À CLASSER', title: 'Sans case', subtitle: `${missing.length} référence${missing.length > 1 ? 's' : ''}`, content: missing.map(part => partHtml(part, true)).join(''), expanded: expandedPanels.has('missing') }) : '<p class="no-result">Toutes les pièces ont une case.</p>';
     return;
   }
-  const visits = plan.visits.map(visit => `<article class="group planned-group" data-score="${visit.score}"><div class="case"><small>ÉTAPE ${visit.step}</small><strong>${escapeHtml(visit.location)}</strong><span>${visit.score < 36 ? 'Recherche facile' : visit.score < 61 ? 'Recherche intermédiaire' : 'Recherche minutieuse'}</span>${visit.split ? `<em>Passage ${visit.visitIndex}/${visit.visitCount}</em>` : ''}</div><div class="parts">${visit.split ? `<p class="split-note">Cette case est ouverte en ${visit.visitCount} passages : ${escapeHtml(visit.splitReason)}.</p>` : ''}${visit.parts.map(part => partHtml(part)).join('')}</div></article>`).join('');
-  const missing = plan.missing.length ? `<article class="group missing"><div class="case"><small>À ATTRIBUER</small><strong>Sans case</strong><span>${plan.missing.length} référence${plan.missing.length > 1 ? 's' : ''}</span></div><div class="parts">${plan.missing.map(part => partHtml(part, true)).join('')}</div></article>` : '';
+  const visits = plan.visits.map(visit => ({ ...visit, visibleParts: visit.parts.filter(part => matchesSearch(part, term)) })).filter(visit => visit.visibleParts.length).map(visit => {
+    const key = panelKeyOf(visit);
+    const extra = visit.split ? `<em>Passage ${visit.visitIndex}/${visit.visitCount}</em>` : '';
+    const note = visit.split ? `<p class="split-note">Cette case est ouverte en ${visit.visitCount} passages : ${escapeHtml(visit.splitReason)}.</p>` : '';
+    return panelHtml({ key, caseClass: 'planned-group', eyebrow: `ÉTAPE ${visit.step}`, title: visit.location, subtitle: visit.score < 36 ? 'Recherche facile' : visit.score < 61 ? 'Recherche intermédiaire' : 'Recherche minutieuse', extra, content: note + visit.visibleParts.map(part => partHtml(part)).join(''), expanded: expandedPanels.has(key) });
+  }).join('');
+  const visibleMissing = plan.missing.filter(part => matchesSearch(part, term));
+  const missing = visibleMissing.length ? panelHtml({ key: 'missing', caseClass: 'missing', eyebrow: 'À ATTRIBUER', title: 'Sans case', subtitle: `${visibleMissing.length} référence${visibleMissing.length > 1 ? 's' : ''}`, content: visibleMissing.map(part => partHtml(part, true)).join(''), expanded: expandedPanels.has('missing') }) : '';
   groups.innerHTML = visits + missing || '<p class="no-result">Aucune pièce ne correspond.</p>';
 }
 
 function updateStats() {
   const located = rows.filter(part => part.location).length;
-  stats.innerHTML = `<strong>${located}/${rows.length}</strong><span>références localisées</span>`;
+  const totalPieces = rows.reduce((total, part) => total + (Number(part.quantity) || 0), 0);
+  const completedPieces = rows.filter(part => part.completed).reduce((total, part) => total + (Number(part.quantity) || 0), 0);
+  const rawPercent = totalPieces ? completedPieces * 100 / totalPieces : 0;
+  const percent = rawPercent > 0 && rawPercent < 10 ? Number(rawPercent.toFixed(1)) : Math.round(rawPercent);
+  stats.innerHTML = `<div class="location-stat"><strong>${located}/${rows.length}</strong><span>références localisées</span></div><div class="progress-stat"><div><strong>${percent}%</strong><span>${completedPieces}/${totalPieces} pièces rangées</span></div><progress value="${completedPieces}" max="${Math.max(totalPieces, 1)}" aria-label="Progression du rangement">${percent}%</progress></div>`;
 }
 
 groups.addEventListener('click', async event => {
+  const panelButton = event.target.closest('[data-toggle-panel]');
+  if (panelButton) {
+    const key = panelButton.dataset.panelKey;
+    expandedPanels.has(key) ? expandedPanels.delete(key) : expandedPanels.add(key);
+    render();
+    return;
+  }
   const button = event.target.closest('[data-save-location]');
   if (!button) return;
   const editor = button.closest('.case-editor');
@@ -121,12 +162,37 @@ groups.addEventListener('click', async event => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
     rows = rows.map(part => keyOf(part) === keyOf(row) ? { ...part, location } : part);
+    expandedPanels.add(`${location}|1`);
     updateStats();
     render();
   } catch (error) {
     status.textContent = error.message;
     status.className = 'save-status failed';
     button.disabled = false;
+  }
+});
+
+groups.addEventListener('change', async event => {
+  const checkbox = event.target.closest('[data-toggle-complete]');
+  if (!checkbox) return;
+  const partKey = checkbox.dataset.rowKey;
+  const completed = checkbox.checked;
+  const previous = rows;
+  rows = rows.map(part => keyOf(part) === partKey ? { ...part, completed } : part);
+  updateStats();
+  render();
+  try {
+    const response = await fetch('/api/progress', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ setNum: currentSetNum, inventory: currentInventory, partKey, completed })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+  } catch (error) {
+    rows = previous;
+    updateStats();
+    render();
+    window.alert(`Progression non enregistrée : ${error.message}`);
   }
 });
 
@@ -147,7 +213,12 @@ form.addEventListener('submit', async event => {
     const response = await fetch('/api/locations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setUrl: setUrl.value, apiKey: apiKey.value, userToken, partListId: partListId.value }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
-    rows = mergeParts(data.setParts, data.storedParts);
+    currentSetNum = data.set.set_num;
+    currentInventory = data.inventory;
+    const completed = new Set(data.progress?.completed || []);
+    rows = mergeParts(data.setParts, data.storedParts).map(part => ({ ...part, completed: completed.has(keyOf(part)) }));
+    expandedPanels.clear();
+    panelsInitialized = false;
     setName.textContent = `${data.set.set_num} · ${data.set.name}${data.inventory != null ? ` · inventaire ${data.inventory}` : ''}`;
     updateStats();
     const locationNotice = document.querySelector('#locationNotice');
@@ -209,18 +280,23 @@ async function autoLogin() {
     const response = await fetch('/api/login/saved', { method: 'POST' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
-    userToken = data.userToken;
+    userToken = '__saved__';
     username.value = data.username || config.username || '';
     [apiKey, username, password].forEach(input => { input.disabled = true; input.required = false; });
     document.querySelector('#login').hidden = true;
     status.className = 'connected';
-    status.textContent = `Connecté automatiquement en tant que ${data.username || config.username}.`;
+    status.textContent = data.username || config.username ? `Connecté automatiquement en tant que ${data.username || config.username}.` : 'Connecté avec la configuration enregistrée sur le PC.';
     document.querySelector('#connection').open = false;
     const importStatus = document.querySelector('#importStatus');
     importStatus.textContent = 'Synchronisation automatique de la part list…';
-    syncViaExtension('locations', 'https://rebrickable.com/users/sourivore/partlists/108467/')
-      .then(result => { importStatus.className = 'connected'; importStatus.textContent = `${result.count} emplacements synchronisés automatiquement.`; })
-      .catch(error => { importStatus.textContent = config.locationCount ? `${config.locationCount} emplacements locaux disponibles.` : error.message; });
+    if (config.local) {
+      syncViaExtension('locations', 'https://rebrickable.com/users/sourivore/partlists/108467/')
+        .then(result => { importStatus.className = 'connected'; importStatus.textContent = `${result.count} emplacements synchronisés automatiquement.`; })
+        .catch(error => { importStatus.textContent = config.locationCount ? `${config.locationCount} emplacements locaux disponibles.` : error.message; });
+    } else {
+      document.querySelector('#connection').hidden = true;
+      importStatus.textContent = `${config.locationCount || 0} emplacements fournis par le PC.`;
+    }
   } catch (error) {
     status.className = 'failed';
     status.textContent = error.message;
@@ -256,5 +332,43 @@ document.querySelectorAll('[data-filter]').forEach(button => button.addEventList
   filter = button.dataset.filter;
   render();
 }));
+document.querySelector('#expandAll').addEventListener('click', () => {
+  groups.querySelectorAll('[data-toggle-panel]').forEach(button => expandedPanels.add(button.dataset.panelKey));
+  render();
+});
+document.querySelector('#collapseAll').addEventListener('click', () => {
+  expandedPanels.clear();
+  panelsInitialized = true;
+  render();
+});
+
+async function loadNetworkInfo() {
+  try {
+    const response = await fetch('/api/network-info');
+    const info = await response.json();
+    const panel = document.querySelector('#networkAccess');
+    const address = info.local ? info.urls?.[0] : location.origin;
+    if (!address) return;
+    panel.hidden = false;
+    const link = document.querySelector('#networkUrl');
+    link.href = address;
+    link.textContent = address;
+    if (!info.local) {
+      document.querySelector('#networkTitle').textContent = 'Connecté au PC';
+      panel.querySelector('span').textContent = 'Cette application fonctionne dans le navigateur du téléphone, sans installation.';
+    }
+  } catch {}
+}
+
+document.querySelector('#copyNetworkUrl').addEventListener('click', async event => {
+  const value = document.querySelector('#networkUrl').href;
+  try {
+    await navigator.clipboard.writeText(value);
+    event.currentTarget.textContent = 'Adresse copiée';
+  } catch {
+    window.prompt('Copiez cette adresse :', value);
+  }
+});
 window.mergeParts = mergeParts;
 autoLogin();
+loadNetworkInfo();

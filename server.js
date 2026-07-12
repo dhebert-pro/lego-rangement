@@ -5,9 +5,11 @@ const zlib = require('node:zlib');
 const os = require('node:os');
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC = path.join(__dirname, 'public');
 const CONFIG_PATH = path.join(__dirname, 'config.local.json');
 const LOCATIONS_PATH = path.join(__dirname, 'locations.local.json');
+const PROGRESS_PATH = path.join(__dirname, 'progress.local.json');
 const SET_INVENTORIES_PATH = path.join(__dirname, 'set-inventories.local.json');
 const LDRAW_DIMENSIONS_PATH = path.join(__dirname, 'data', 'ldraw-dimensions.json');
 const STUDIO_META_PATH = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Stud.io', 'BLBrickMetaInfo') : path.join(os.homedir(), 'AppData', 'Local', 'Stud.io', 'BLBrickMetaInfo');
@@ -17,6 +19,23 @@ const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
   res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
+}
+
+function isLoopback(req) {
+  const address = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  return address === '127.0.0.1' || address === '::1';
+}
+
+function networkUrls() {
+  const urls = [];
+  Object.values(os.networkInterfaces()).flat().forEach(address => {
+    if (!address || address.family !== 'IPv4' || address.internal) return;
+    const value = address.address;
+    const privateAddress = /^10\./.test(value) || /^192\.168\./.test(value) || /^172\.(1[6-9]|2\d|3[01])\./.test(value);
+    if (privateAddress) urls.push(`http://${value}:${PORT}`);
+  });
+  const rank = url => url.includes('//192.168.') ? 0 : url.includes('//10.') ? 1 : 2;
+  return [...new Set(urls)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 function readJson(file, fallback = {}) {
@@ -235,7 +254,7 @@ async function savedLogin(res) {
       delete local.password;
       saveConfig(local);
     }
-    send(res, 200, { userToken: local.userToken, username: local.username, partListId: local.partListId || 108467 });
+    send(res, 200, { connected: true, partListId: local.partListId || 108467 });
   } catch (error) {
     send(res, error.status || 502, { error: error.message || 'Connexion enregistrée invalide.' });
   }
@@ -368,6 +387,36 @@ function assignLocation(input) {
   return { mapping: mappings[mappings.length - 1], count: mappings.length };
 }
 
+function progressSetKey(setNum, inventory) {
+  return `${String(setNum || '').trim()}|${inventory == null ? 'current' : Number(inventory)}`;
+}
+
+function progressFor(setNum, inventory) {
+  const progress = readJson(PROGRESS_PATH, { sets: {} });
+  return progress.sets?.[progressSetKey(setNum, inventory)] || { completed: [] };
+}
+
+function completedWithChange(values, partKey, completed) {
+  const result = new Set(values || []);
+  completed ? result.add(partKey) : result.delete(partKey);
+  return [...result].sort();
+}
+
+function updateProgress(input) {
+  const setNum = cleanSetNumber(input.setNum);
+  const inventory = input.inventory == null || input.inventory === '' ? null : Number(input.inventory);
+  if (inventory != null && (!Number.isInteger(inventory) || inventory < 0)) throw new Error('Version d’inventaire invalide.');
+  const partKey = String(input.partKey || '').trim();
+  if (!partKey || partKey.length > 200 || !partKey.includes('|')) throw new Error('Référence de pièce invalide.');
+  const progress = readJson(PROGRESS_PATH, { sets: {} });
+  progress.sets ||= {};
+  const key = progressSetKey(setNum, inventory);
+  const completed = completedWithChange(progress.sets[key]?.completed, partKey, Boolean(input.completed));
+  progress.sets[key] = { updatedAt: new Date().toISOString(), completed };
+  fs.writeFileSync(PROGRESS_PATH, `${JSON.stringify(progress, null, 2)}\n`, 'utf8');
+  return progress.sets[key];
+}
+
 function unzip(buffer) {
   let eocd = -1;
   for (let offset = buffer.length - 22; offset >= Math.max(0, buffer.length - 65557); offset -= 1) {
@@ -483,7 +532,7 @@ async function api(req, res) {
   const input = JSON.parse(raw || '{}');
   const local = savedConfig();
   const apiKey = input.apiKey || process.env.REBRICKABLE_API_KEY || local.apiKey;
-  const userToken = input.userToken || local.userToken;
+  const userToken = input.userToken && input.userToken !== '__saved__' ? input.userToken : local.userToken;
   if (!apiKey) return send(res, 400, { error: 'Ajoutez votre clé API Rebrickable.' });
   if (!userToken) return send(res, 400, { error: 'Ajoutez votre jeton utilisateur Rebrickable.' });
 
@@ -518,14 +567,17 @@ async function api(req, res) {
       const partListId = Number(input.partListId || local.partListId || 108467);
       storedParts = addImportedLocations(await getAll(`${base}/users/${encodeURIComponent(userToken)}/partlists/${partListId}/parts/?page_size=500`, apiKey));
     }
-    send(res, 200, { set, setParts, storedParts, inventory, physicalData: physicalData.status, locationImport: { count: locationImport.mappings?.length || 0, importedAt: locationImport.importedAt || null } });
+    send(res, 200, { set, setParts, storedParts, inventory, progress: progressFor(setNum, inventory), physicalData: physicalData.status, locationImport: { count: locationImport.mappings?.length || 0, importedAt: locationImport.importedAt || null } });
   } catch (error) {
     send(res, error.status || 500, { error: error.message || 'Erreur inattendue.' });
   }
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'POST' && req.url === '/api/login') return login(req, res);
+  if (req.method === 'POST' && req.url === '/api/login') {
+    if (!isLoopback(req)) return send(res, 403, { error: 'Configurez la connexion Rebrickable depuis le PC.' });
+    return login(req, res);
+  }
   if (req.method === 'POST' && req.url === '/api/login/saved') return savedLogin(res);
   if (req.method === 'POST' && req.url === '/api/locations/import') {
     try {
@@ -562,11 +614,20 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, assignLocation(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
+  if (req.method === 'POST' && req.url === '/api/progress') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      return send(res, 200, updateProgress(JSON.parse(raw || '{}')));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
   if (req.method === 'POST' && req.url === '/api/locations') return api(req, res);
   if (req.method === 'GET' && req.url === '/api/config-status') {
     const local = savedConfig();
     const locations = readJson(LOCATIONS_PATH);
-    return send(res, 200, { configured: Boolean(local.apiKey && (local.userToken || local.password)), username: local.username || '', partListId: local.partListId || 108467, locationCount: locations.mappings?.length || 0 });
+    return send(res, 200, { configured: Boolean(local.apiKey && (local.userToken || local.password)), username: isLoopback(req) ? local.username || '' : '', partListId: local.partListId || 108467, locationCount: locations.mappings?.length || 0, local: isLoopback(req) });
+  }
+  if (req.method === 'GET' && req.url === '/api/network-info') {
+    return send(res, 200, { urls: networkUrls(), port: PORT, local: isLoopback(req) });
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Méthode non autorisée' });
   const requested = req.url === '/' ? '/index.html' : req.url.split('?')[0];
@@ -575,5 +636,8 @@ const server = http.createServer(async (req, res) => {
   fs.readFile(file, (err, content) => err ? send(res, 404, { error: 'Introuvable' }) : send(res, 200, content, types[path.extname(file)] || 'application/octet-stream'));
 });
 
-if (require.main === module) server.listen(PORT, () => console.log(`LEGO Rangement : http://localhost:${PORT}`));
-module.exports = { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, server };
+if (require.main === module) server.listen(PORT, HOST, () => {
+  console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
+  networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
+});
+module.exports = { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange, networkUrls, server };

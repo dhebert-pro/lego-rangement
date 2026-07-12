@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping } = require('../server');
-const { pieceDifficulty, buildStoragePlan } = require('../public/planner');
+const { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange } = require('../server');
+const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
 test('accepte directement un numéro de set', () => assert.equal(cleanSetNumber('75379-1'), '75379-1'));
@@ -53,4 +53,48 @@ test('peut rouvrir une case lorsque les groupes physiques sont très éloignés'
   const plan = buildStoragePlan(rows);
   assert.equal(plan.visits.length, 2);
   assert.deepEqual(plan.visits.map(visit => visit.visitIndex), [1, 2]);
+});
+test('reconnaît la forme de base des pièces imprimées', () => {
+  assert.equal(shapeKey({ part: { part_num: '3069bpr0205', print_of: '3069b' } }), '3069b');
+});
+test('indique quand une étape termine une forme, une couleur ou les deux', () => {
+  const physical = { dimensionsCm: [1, 1, 1], volumeCm3: 1 };
+  const plan = buildStoragePlan([
+    { location: 'A1', quantity: 1, part: { part_num: 'shape-a' }, color: { id: 1, name: 'Rouge' }, physical },
+    { location: 'A1', quantity: 1, part: { part_num: 'shape-a' }, color: { id: 2, name: 'Bleu' }, physical },
+    { location: 'A1', quantity: 1, part: { part_num: 'shape-b' }, color: { id: 1, name: 'Rouge' }, physical }
+  ]);
+  const [redA, blueA, redB] = plan.rows;
+  assert.deepEqual(redA.coordination, { shapeComplete: true, colorComplete: true, both: true, colorCount: 2, shapeCount: 2 });
+  assert.deepEqual(blueA.coordination, { shapeComplete: true, colorComplete: false, both: false, colorCount: 2, shapeCount: 1 });
+  assert.deepEqual(redB.coordination, { shapeComplete: false, colorComplete: true, both: false, colorCount: 1, shapeCount: 2 });
+});
+test('ne signale pas une forme répartie sur plusieurs étapes', () => {
+  const physical = { dimensionsCm: [1, 1, 1], volumeCm3: 1 };
+  const plan = buildStoragePlan([
+    { location: 'A1', quantity: 1, part: { part_num: 'shape-a' }, color: { id: 1 }, physical },
+    { location: 'B1', quantity: 1, part: { part_num: 'shape-a' }, color: { id: 2 }, physical }
+  ]);
+  assert.equal(plan.rows[0].coordination.shapeComplete, false);
+  assert.equal(plan.rows[1].coordination.shapeComplete, false);
+});
+test('considère deux passages dans la même case comme deux étapes', () => {
+  const plan = buildStoragePlan([
+    { location: 'A1', quantity: 20, part: { part_num: 'shape-a' }, color: { id: 1, rgb: 'FF0000' }, physical: { dimensionsCm: [8, 8, 4], volumeCm3: 256 } },
+    { location: 'A1', quantity: 1, part: { part_num: 'shape-a' }, color: { id: 2, rgb: '808080' }, physical: { dimensionsCm: [0.1, 0.1, 0.1], volumeCm3: 0.001 } }
+  ]);
+  assert.equal(plan.visits.length, 2);
+  assert.equal(plan.rows[0].coordination.shapeComplete, false);
+});
+test('une pièce sans case invalide l’indicateur de sa forme', () => {
+  const physical = { dimensionsCm: [1, 1, 1], volumeCm3: 1 };
+  const plan = buildStoragePlan([
+    { location: 'A1', quantity: 1, part: { part_num: 'shape-a' }, color: { id: 1 }, physical },
+    { location: '', quantity: 1, part: { part_num: 'shape-a' }, color: { id: 2 }, physical }
+  ]);
+  assert.equal(plan.rows[0].coordination.shapeComplete, false);
+});
+test('ajoute et retire une référence de la progression sans doublon', () => {
+  assert.deepEqual(completedWithChange(['3001|1'], '3002|2', true), ['3001|1', '3002|2']);
+  assert.deepEqual(completedWithChange(['3001|1', '3001|1'], '3001|1', false), []);
 });

@@ -95,8 +95,39 @@
     }));
   }
 
+  function shapeKey(row) {
+    const part = row.part || {};
+    const value = part.print_of?.part_num || part.print_of || part.mold_part_num?.part_num || part.mold_part_num || part.part_num || '';
+    return String(value);
+  }
+
+  function addCoordinationIndicators(rows, visits) {
+    const stepById = new Map();
+    visits.forEach(visit => visit.parts.forEach(row => stepById.set(row.planId, visit.step)));
+    const shapes = new Map(), colors = new Map();
+    rows.forEach(row => {
+      const shape = shapeKey(row);
+      const color = row.color?.id != null ? `id:${row.color.id}` : `unknown:${row.planId}`;
+      shapes.set(shape, [...(shapes.get(shape) || []), row]);
+      colors.set(color, [...(colors.get(color) || []), row]);
+    });
+    const allAtSameStep = group => {
+      const steps = new Set(group.map(row => stepById.get(row.planId)));
+      return !steps.has(undefined) && steps.size === 1;
+    };
+    rows.forEach(row => {
+      const shapeGroup = shapes.get(shapeKey(row)) || [];
+      const colorGroup = colors.get(row.color?.id != null ? `id:${row.color.id}` : `unknown:${row.planId}`) || [];
+      const colorCount = new Set(shapeGroup.map(item => item.color?.id).filter(value => value != null)).size;
+      const shapeCount = new Set(colorGroup.map(shapeKey)).size;
+      const shapeComplete = colorCount > 1 && allAtSameStep(shapeGroup);
+      const colorComplete = row.color?.id != null && shapeCount > 1 && allAtSameStep(colorGroup);
+      row.coordination = { shapeComplete, colorComplete, both: shapeComplete && colorComplete, colorCount, shapeCount };
+    });
+  }
+
   function buildStoragePlan(inputRows) {
-    const rows = inputRows.map(row => ({ ...row, sorting: pieceDifficulty(row) }));
+    const rows = inputRows.map((row, index) => ({ ...row, planId: index, sorting: pieceDifficulty(row) }));
     const missing = rows.filter(row => !String(row.location || '').trim()).sort((a, b) => a.sorting.score - b.sorting.score);
     const cases = new Map();
     rows.filter(row => String(row.location || '').trim()).forEach(row => {
@@ -106,8 +137,9 @@
     const visits = [...cases].flatMap(([location, parts]) => visitsForCase(location, parts));
     visits.sort((a, b) => a.score - b.score || a.location.localeCompare(b.location, 'fr', { numeric: true }) || a.visitIndex - b.visitIndex);
     visits.forEach((visit, index) => { visit.step = index + 1; });
+    addCoordinationIndicators(rows, visits);
     return { rows, visits, missing };
   }
 
-  return { rgbProfile, physicalProfile, pieceDifficulty, buildStoragePlan };
+  return { rgbProfile, physicalProfile, pieceDifficulty, shapeKey, buildStoragePlan };
 });
