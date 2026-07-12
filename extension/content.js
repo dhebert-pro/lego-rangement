@@ -72,7 +72,13 @@
   }
 
   async function exportCsv() {
-    const exportControl = controls().find(element => /export\s+parts/i.test(label(element)) && visible(element));
+    let exportControl = null;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      exportControl = controls().find(element => /export\s+parts/i.test(label(element)) && visible(element));
+      if (exportControl) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    exportControl ||= controls().find(element => /export\s+parts/i.test(label(element)));
     if (!exportControl) throw new Error('Bouton « Export Parts » introuvable.');
     exportControl.click();
     const csvControl = await waitForCsvControl();
@@ -89,6 +95,14 @@
       const requested = inventoryOf(sourceUrl);
       const actual = inventoryOf(location.href);
       if (requested && actual !== requested) throw new Error(`Rebrickable a ouvert l’inventaire ${actual || 'par défaut'} au lieu de ${requested}.`);
+    }
+    if (mode === 'moc' && location.hash !== '#parts') {
+      const partsTab = controls().find(element => {
+        try { return new URL(element.href || '', location.href).hash === '#parts'; } catch { return false; }
+      });
+      if (partsTab) partsTab.click();
+      else location.hash = 'parts';
+      await new Promise(resolve => setTimeout(resolve, 1200));
     }
     const content = await exportCsv();
     const metadata = {

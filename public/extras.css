@@ -91,6 +91,21 @@ button.case { width: 100%; min-width: 0; border-radius: 0; text-align: left; whi
 .network-access span { color: #cbd5d0; font-size: 12px; }
 .network-access a { color: var(--yellow); font-size: 18px; font-weight: 850; overflow-wrap: anywhere; }
 .network-access button { min-height: 44px; }
+.overfull-cases { margin-top: 14px; padding: 16px 18px; border: 2px solid #e2aaa5; border-radius: 9px; background: #fff8f5; }
+.overfull-cases summary { display: flex; align-items: center; gap: 9px; color: #8f2119; }
+.overfull-cases summary b { min-width: 25px; padding: 2px 7px; border-radius: 99px; background: var(--red); color: white; text-align: center; }
+.overfull-cases > p { margin: 9px 0 13px; color: #68716d; font-size: 13px; }
+#overfullForm { display: grid; grid-template-columns: 180px minmax(240px, 1fr) auto; align-items: end; gap: 10px; padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+#overfullForm label { font-size: 12px; font-weight: 800; }
+#overfullForm input { margin-top: 4px; padding: 10px 12px; }
+#overfullForm button { min-height: 43px; background: var(--red); color: white; }
+.overfull-list { margin-top: 13px; }
+.overfull-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #efd2cf; }
+.overfull-item strong, .overfull-item span { display: block; }
+.overfull-item strong { font-size: 17px; }
+.overfull-item span, .no-overfull { color: #68716d; font-size: 12px; }
+.overfull-item button { min-height: 38px; padding: 0 12px; background: #f1dedb; color: #8f2119; }
+#overfullStatus { display: block; min-height: 18px; margin-top: 7px; }
 .filters button { min-height: 42px; }
 @media (max-width: 700px) {
   .import-panel { align-items: stretch; flex-direction: column; }
@@ -98,6 +113,8 @@ button.case { width: 100%; min-width: 0; border-radius: 0; text-align: left; whi
   .import-actions { align-items: stretch; flex-direction: column; }
   .split-note { margin: 0 -10px; padding-left: 10px; padding-right: 10px; }
   .network-access { align-items: stretch; flex-direction: column; }
+  #overfullForm { display: block; }
+  #overfullForm label, #overfullForm button { display: block; width: 100%; margin-top: 10px; }
   .result-head #stats { min-width: 0; margin-top: 12px; }
   .location-stat, .progress-stat > div { justify-content: flex-start; }
   .group, .group.expanded { display: block; }

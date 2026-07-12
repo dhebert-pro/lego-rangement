@@ -443,6 +443,54 @@ async function loadNetworkInfo() {
   } catch {}
 }
 
+function renderOverfullCases(cases) {
+  const list = document.querySelector('#overfullList');
+  document.querySelector('#overfullCount').textContent = cases.length;
+  list.innerHTML = cases.length ? cases.map(item => `<div class="overfull-item"><div><strong>${escapeHtml(item.location)}</strong>${item.note ? `<span>${escapeHtml(item.note)}</span>` : '<span>Aucune remarque</span>'}</div><button type="button" data-remove-overfull="${escapeHtml(item.location)}" aria-label="Retirer la case ${escapeHtml(item.location)}">Retirer</button></div>`).join('') : '<p class="no-overfull">Aucune case signalée.</p>';
+}
+
+async function loadOverfullCases() {
+  try {
+    const response = await fetch('/api/overfull-cases');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    renderOverfullCases(data.cases || []);
+  } catch (error) {
+    document.querySelector('#overfullStatus').textContent = error.message;
+  }
+}
+
+document.querySelector('#overfullForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const location = document.querySelector('#overfullLocation').value.trim();
+  const note = document.querySelector('#overfullNote').value.trim();
+  const status = document.querySelector('#overfullStatus');
+  status.textContent = 'Enregistrement…';
+  try {
+    const response = await fetch('/api/overfull-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ location, note }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    renderOverfullCases(data.cases || []);
+    form.reset();
+    status.textContent = `Case ${location} ajoutée.`;
+  } catch (error) { status.textContent = error.message; }
+});
+
+document.querySelector('#overfullList').addEventListener('click', async event => {
+  const button = event.target.closest('[data-remove-overfull]');
+  if (!button) return;
+  const location = button.dataset.removeOverfull;
+  const status = document.querySelector('#overfullStatus');
+  try {
+    const response = await fetch('/api/overfull-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'remove', location }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    renderOverfullCases(data.cases || []);
+    status.textContent = `Case ${location} retirée de la liste.`;
+  } catch (error) { status.textContent = error.message; }
+});
+
 document.querySelector('#copyNetworkUrl').addEventListener('click', async event => {
   const value = document.querySelector('#networkUrl').href;
   try {
@@ -455,3 +503,4 @@ document.querySelector('#copyNetworkUrl').addEventListener('click', async event 
 window.mergeParts = mergeParts;
 autoLogin();
 loadNetworkInfo();
+loadOverfullCases();

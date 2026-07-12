@@ -20,6 +20,10 @@ Chaque pièce ou étape entière peut être cochée comme rangée. **Tout décoc
 
 Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant lors de son premier chargement et le conserve dans `set-inventories.local.json`. Il n’est pas nécessaire de relancer l’extension entre deux recherches ; son bouton **Actualiser** ne sert qu’après une mise à jour de son code.
 
+## Cases trop pleines
+
+Le panneau **Cases trop pleines** permet d’enregistrer un numéro de case et une remarque facultative depuis le PC ou le téléphone. Cette liste est partagée dans `overfull-cases.local.json` et exclue de Git. Pour le moment elle sert uniquement de registre : aucun déplacement, découpage ou regroupement de cases n’est effectué automatiquement.
+
 ## Ordre de rangement
 
 Le nom de la pièce n’est jamais utilisé pour estimer sa forme ou sa taille. Le score repose sur :

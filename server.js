@@ -11,6 +11,7 @@ const CONFIG_PATH = path.join(__dirname, 'config.local.json');
 const LOCATIONS_PATH = path.join(__dirname, 'locations.local.json');
 const PROGRESS_PATH = path.join(__dirname, 'progress.local.json');
 const SET_INVENTORIES_PATH = path.join(__dirname, 'set-inventories.local.json');
+const OVERFULL_CASES_PATH = path.join(__dirname, 'overfull-cases.local.json');
 const LDRAW_DIMENSIONS_PATH = path.join(__dirname, 'data', 'ldraw-dimensions.json');
 const STUDIO_META_PATH = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Stud.io', 'BLBrickMetaInfo') : path.join(os.homedir(), 'AppData', 'Local', 'Stud.io', 'BLBrickMetaInfo');
 
@@ -417,6 +418,28 @@ function assignLocation(input) {
   return { mapping: mappings[mappings.length - 1], count: mappings.length };
 }
 
+function updateOverfullCases(input) {
+  const data = readJson(OVERFULL_CASES_PATH, { cases: [] });
+  const location = String(input.location || '').trim();
+  if (!location || location.length > 80) throw new Error('Indiquez une case valide.');
+  const sameLocation = item => String(item.location || '').toLocaleLowerCase('fr') === location.toLocaleLowerCase('fr');
+  if (input.action === 'remove') {
+    data.cases = (data.cases || []).filter(item => !sameLocation(item));
+  } else {
+    const existing = (data.cases || []).find(sameLocation);
+    const item = {
+      location,
+      note: String(input.note || '').trim().slice(0, 300),
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    data.cases = [...(data.cases || []).filter(entry => !sameLocation(entry)), item];
+  }
+  data.cases.sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
+  fs.writeFileSync(OVERFULL_CASES_PATH, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  return data;
+}
+
 function progressSetKey(setNum, inventory) {
   return `${String(setNum || '').trim()}|${inventory == null ? 'current' : Number(inventory)}`;
 }
@@ -678,6 +701,15 @@ const server = http.createServer(async (req, res) => {
     try {
       let raw = ''; for await (const chunk of req) raw += chunk;
       return send(res, 200, assignLocation(JSON.parse(raw || '{}')));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
+  if (req.method === 'GET' && req.url === '/api/overfull-cases') {
+    return send(res, 200, readJson(OVERFULL_CASES_PATH, { cases: [] }));
+  }
+  if (req.method === 'POST' && req.url === '/api/overfull-cases') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      return send(res, 200, updateOverfullCases(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
   if (req.method === 'POST' && req.url === '/api/progress') {
