@@ -35,8 +35,31 @@
   border-radius: 5px;
 }
 .notice strong { margin-right: 5px; }
+.physical-notice { border-left-color: #3084c6; background: #eaf5ff; }
+.bricklink-settings { grid-template-columns: repeat(4, 1fr); }
+.group .case em { margin-top: 10px; padding: 4px 7px; border: 1px solid #ffffff66; border-radius: 4px; font-size: 11px; font-style: normal; font-weight: 800; }
+.planned-group .case small { color: var(--yellow); }
+.split-note { margin: 0 -20px; padding: 9px 20px; background: #fff7ce; color: #665819; font-size: 12px; }
+.part-info { min-width: 0; padding: 11px 0; }
+.part-info > span { display: block; }
+.part-info .physical-data { margin-top: 3px; color: #43514b; }
+.difficulty { width: fit-content; margin-top: 6px; padding: 2px 7px; border-radius: 99px; font-weight: 750; }
+.difficulty-facile { background: #d9f2e5; color: #075f3e !important; }
+.difficulty-intermédiaire { background: #fff1b8; color: #6e5600 !important; }
+.difficulty-minutieux { background: #fde1dc; color: #9b2f21 !important; }
+.case-editor { margin-top: 7px; font-size: 12px; }
+.case-editor summary { width: fit-content; color: var(--green); font-weight: 800; }
+.case-editor > div { display: flex; gap: 6px; margin-top: 7px; max-width: 360px; }
+.case-editor input { min-width: 90px; padding: 7px 9px; }
+.case-editor button { padding: 0 11px; }
+.case-editor .save-status { margin-top: 4px; }
+.case-editor .failed { color: var(--red); font-weight: 700; }
+.unassigned { min-height: 104px; }
+.unassigned .case-editor summary { color: var(--red); }
 @media (max-width: 700px) {
   .import-panel { align-items: stretch; flex-direction: column; }
   .file-button, .secondary-button { text-align: center; }
   .import-actions { align-items: stretch; flex-direction: column; }
+  .bricklink-settings { grid-template-columns: 1fr; }
+  .split-note { margin: 0 -10px; padding-left: 10px; padding-right: 10px; }
 }

@@ -2,12 +2,14 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const crypto = require('node:crypto');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC = path.join(__dirname, 'public');
 const CONFIG_PATH = path.join(__dirname, 'config.local.json');
 const LOCATIONS_PATH = path.join(__dirname, 'locations.local.json');
 const SET_INVENTORIES_PATH = path.join(__dirname, 'set-inventories.local.json');
+const BRICKLINK_CACHE_PATH = path.join(__dirname, 'bricklink-cache.local.json');
 
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
@@ -25,7 +27,19 @@ function savedConfig() {
 }
 
 function saveConfig(rebrickable) {
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify({ rebrickable }, null, 2)}\n`, 'utf8');
+  const config = readJson(CONFIG_PATH);
+  config.rebrickable = rebrickable;
+  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+}
+
+function savedBrickLinkConfig() {
+  return readJson(CONFIG_PATH).bricklink || {};
+}
+
+function saveBrickLinkConfig(bricklink) {
+  const config = readJson(CONFIG_PATH);
+  config.bricklink = bricklink;
+  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }
 
 async function createUserToken(apiKey, username, password) {
@@ -73,6 +87,95 @@ async function getAll(url, apiKey) {
     if (next) await wait(1050);
   }
   return results;
+}
+
+const oauthEncode = value => encodeURIComponent(String(value)).replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+
+async function requestBrickLinkItem(partNum, credentials = savedBrickLinkConfig()) {
+  const required = ['consumerKey', 'consumerSecret', 'token', 'tokenSecret'];
+  if (!required.every(key => credentials[key])) throw Object.assign(new Error('Connexion BrickLink non configurée.'), { code: 'BRICKLINK_NOT_CONFIGURED' });
+  const url = `https://api.bricklink.com/api/store/v1/items/PART/${encodeURIComponent(partNum)}`;
+  const oauth = {
+    oauth_consumer_key: credentials.consumerKey,
+    oauth_nonce: crypto.randomBytes(16).toString('hex'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: Math.floor(Date.now() / 1000),
+    oauth_token: credentials.token,
+    oauth_version: '1.0'
+  };
+  const parameterString = Object.entries(oauth).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${oauthEncode(key)}=${oauthEncode(value)}`).join('&');
+  const signatureBase = `GET&${oauthEncode(url)}&${oauthEncode(parameterString)}`;
+  oauth.oauth_signature = crypto.createHmac('sha1', `${oauthEncode(credentials.consumerSecret)}&${oauthEncode(credentials.tokenSecret)}`).update(signatureBase).digest('base64');
+  const authorization = `OAuth ${Object.entries(oauth).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${oauthEncode(key)}="${oauthEncode(value)}"`).join(', ')}`;
+  const response = await fetch(url, { headers: { Authorization: authorization } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.meta?.code >= 400) {
+    const status = body.meta?.code || response.status;
+    throw Object.assign(new Error(body.meta?.message || `Erreur BrickLink (${status})`), { status });
+  }
+  return body.data || {};
+}
+
+function physicalFromBrickLink(item, bricklinkNo) {
+  const number = value => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
+  const dimensionsCm = [number(item.dim_x), number(item.dim_y), number(item.dim_z)];
+  const completeDimensions = dimensionsCm.every(value => value != null);
+  return {
+    source: 'BrickLink',
+    bricklinkNo: String(bricklinkNo || item.no || ''),
+    weightG: number(item.weight),
+    dimensionsCm,
+    volumeCm3: completeDimensions ? Number(dimensionsCm.reduce((product, value) => product * value, 1).toFixed(3)) : null
+  };
+}
+
+function brickLinkNumber(part) {
+  const external = part?.part?.external_ids?.BrickLink ?? part?.external_ids?.BrickLink;
+  const candidate = Array.isArray(external) ? external[0] : external;
+  return candidate == null || String(candidate).trim() === '' ? null : String(candidate).trim();
+}
+
+async function enrichWithBrickLink(parts) {
+  const credentials = savedBrickLinkConfig();
+  if (!['consumerKey', 'consumerSecret', 'token', 'tokenSecret'].every(key => credentials[key])) {
+    return { parts, status: { configured: false, available: 0, total: parts.length } };
+  }
+  const cache = readJson(BRICKLINK_CACHE_PATH, { items: {} });
+  cache.items ||= {};
+  const unique = [...new Set(parts.map(brickLinkNumber).filter(Boolean))];
+  let cursor = 0;
+  let lastError = '';
+  let authenticationFailed = false;
+  const worker = async () => {
+    while (cursor < unique.length && !authenticationFailed) {
+      const partNum = unique[cursor++];
+      const cached = cache.items[partNum];
+      const cacheDuration = cached?.physical ? 90 * 24 * 60 * 60 * 1000 : 5 * 60 * 1000;
+      const fresh = cached?.fetchedAt && Date.now() - new Date(cached.fetchedAt).getTime() < cacheDuration;
+      if (fresh) continue;
+      try {
+        const item = await requestBrickLinkItem(partNum, credentials);
+        cache.items[partNum] = { fetchedAt: new Date().toISOString(), physical: physicalFromBrickLink(item, partNum) };
+      } catch (error) {
+        lastError = error.message;
+        if ([401, 403].includes(error.status)) authenticationFailed = true;
+        cache.items[partNum] = { fetchedAt: new Date().toISOString(), physical: null, error: error.message };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, unique.length) }, worker));
+  fs.writeFileSync(BRICKLINK_CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, 'utf8');
+  const enriched = parts.map(part => {
+    const number = brickLinkNumber(part);
+    return { ...part, physical: number ? cache.items[number]?.physical || null : null, bricklinkNo: number };
+  });
+  return {
+    parts: enriched,
+    status: { configured: true, available: enriched.filter(part => part.physical?.weightG || part.physical?.dimensionsCm?.some(Boolean)).length, total: enriched.length, error: lastError }
+  };
 }
 
 async function login(req, res) {
@@ -214,6 +317,28 @@ function importLocationMappings(input) {
   return mappings.length;
 }
 
+function upsertLocationMapping(mappings, input) {
+  const mapping = {
+    partNum: String(input.partNum || '').trim(),
+    colorId: Number.isInteger(Number(input.colorId)) && String(input.colorId).trim() !== '' ? Number(input.colorId) : null,
+    colorName: String(input.colorName || '').trim(),
+    location: String(input.location || '').trim()
+  };
+  if (!mapping.partNum) throw new Error('Numéro de pièce manquant.');
+  if (!mapping.location) throw new Error('Indiquez un numéro de case.');
+  const samePartColor = item => item.partNum === mapping.partNum && (
+    mapping.colorId != null ? Number(item.colorId) === mapping.colorId : String(item.colorName || '').toLowerCase() === mapping.colorName.toLowerCase()
+  );
+  return [...(mappings || []).filter(item => !samePartColor(item)), mapping];
+}
+
+function assignLocation(input) {
+  const current = readJson(LOCATIONS_PATH, { mappings: [] });
+  const mappings = upsertLocationMapping(current.mappings, input);
+  fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ ...current, importedAt: new Date().toISOString(), mappings }, null, 2)}\n`, 'utf8');
+  return { mapping: mappings[mappings.length - 1], count: mappings.length };
+}
+
 function unzip(buffer) {
   let eocd = -1;
   for (let offset = buffer.length - 22; offset >= Math.max(0, buffer.length - 65557); offset -= 1) {
@@ -337,7 +462,7 @@ async function api(req, res) {
     const setNum = cleanSetNumber(input.setUrl);
     const base = 'https://rebrickable.com/api/v3';
     const set = await requestJson(`${base}/lego/sets/${encodeURIComponent(setNum)}/`, apiKey);
-    const catalogParts = await getAll(`${base}/lego/sets/${encodeURIComponent(setNum)}/parts/?page_size=500&inc_spares=0&inc_minifig_parts=1`, apiKey);
+    const catalogParts = await getAll(`${base}/lego/sets/${encodeURIComponent(setNum)}/parts/?page_size=500&inc_spares=0&inc_minifig_parts=1&inc_part_details=1`, apiKey);
     const inventory = inventoryFromUrl(input.setUrl);
     let setParts = catalogParts;
     if (inventory != null) {
@@ -349,6 +474,8 @@ async function api(req, res) {
         return detail ? { ...detail, quantity: item.quantity, is_spare: false } : { part: { part_num: item.partNum, name: item.partNum }, color: { id: item.colorId, name: `Couleur ${item.colorId}` }, quantity: item.quantity, is_spare: false };
       });
     }
+    const physicalData = await enrichWithBrickLink(setParts);
+    setParts = physicalData.parts;
     const locationImport = readJson(LOCATIONS_PATH);
     const importedMappings = locationImport.mappings || [];
     let storedParts;
@@ -362,7 +489,7 @@ async function api(req, res) {
       const partListId = Number(input.partListId || local.partListId || 108467);
       storedParts = addImportedLocations(await getAll(`${base}/users/${encodeURIComponent(userToken)}/partlists/${partListId}/parts/?page_size=500`, apiKey));
     }
-    send(res, 200, { set, setParts, storedParts, inventory, locationImport: { count: locationImport.mappings?.length || 0, importedAt: locationImport.importedAt || null } });
+    send(res, 200, { set, setParts, storedParts, inventory, physicalData: physicalData.status, locationImport: { count: locationImport.mappings?.length || 0, importedAt: locationImport.importedAt || null } });
   } catch (error) {
     send(res, error.status || 500, { error: error.message || 'Erreur inattendue.' });
   }
@@ -400,11 +527,31 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, importSetInventory(input.sourceUrl, input.content || ''));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
+  if (req.method === 'POST' && req.url === '/api/locations/assign') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      return send(res, 200, assignLocation(JSON.parse(raw || '{}')));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
+  if (req.method === 'POST' && req.url === '/api/bricklink/config') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      const input = JSON.parse(raw || '{}');
+      const bricklink = Object.fromEntries(['consumerKey', 'consumerSecret', 'token', 'tokenSecret'].map(key => [key, String(input[key] || '').trim()]));
+      if (Object.values(bricklink).some(value => !value)) throw new Error('Les quatre identifiants API BrickLink sont nécessaires.');
+      saveBrickLinkConfig(bricklink);
+      const cache = readJson(BRICKLINK_CACHE_PATH, { items: {} });
+      cache.items = Object.fromEntries(Object.entries(cache.items || {}).filter(([, item]) => item.physical));
+      fs.writeFileSync(BRICKLINK_CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, 'utf8');
+      return send(res, 200, { configured: true });
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
   if (req.method === 'POST' && req.url === '/api/locations') return api(req, res);
   if (req.method === 'GET' && req.url === '/api/config-status') {
     const local = savedConfig();
+    const bricklink = savedBrickLinkConfig();
     const locations = readJson(LOCATIONS_PATH);
-    return send(res, 200, { configured: Boolean(local.apiKey && (local.userToken || local.password)), username: local.username || '', partListId: local.partListId || 108467, locationCount: locations.mappings?.length || 0 });
+    return send(res, 200, { configured: Boolean(local.apiKey && (local.userToken || local.password)), username: local.username || '', partListId: local.partListId || 108467, locationCount: locations.mappings?.length || 0, bricklinkConfigured: ['consumerKey', 'consumerSecret', 'token', 'tokenSecret'].every(key => bricklink[key]) });
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Méthode non autorisée' });
   const requested = req.url === '/' ? '/index.html' : req.url.split('?')[0];
@@ -414,4 +561,4 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) server.listen(PORT, () => console.log(`LEGO Rangement : http://localhost:${PORT}`));
-module.exports = { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, server };
+module.exports = { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, physicalFromBrickLink, upsertLocationMapping, server };
