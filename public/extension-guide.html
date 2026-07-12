@@ -16,11 +16,12 @@
     <li>Activez <strong>Mode développeur</strong> en haut à droite.</li>
     <li>Cliquez sur <strong>Charger l’extension non empaquetée</strong>.</li>
     <li>Sélectionnez ce dossier :<code>C:\Users\proda\OneDrive\Documents\LEGO\extension</code></li>
-    <li>Si le module était déjà installé, cliquez d’abord sur son bouton <strong>Actualiser</strong> dans <code>chrome://extensions</code>.</li>
+    <li>Si le module était déjà installé et que l’application vient d’être mise à jour, cliquez une fois sur son bouton <strong>Actualiser</strong> dans <code>chrome://extensions</code>.</li>
     <li>Ouvrez ou rechargez n’importe quelle page Rebrickable. Le module ouvrira la part list <code>108467</code> dans un onglet inactif, réalisera l’export puis fermera cet onglet automatiquement.</li>
     <li>Pour un set comportant <code>inventory=1</code> ou une autre révision, le même mécanisme exporte automatiquement la version exacte avant la recherche.</li>
     <li>Pour un lien <code>/mocs/MOC-…</code>, le module exporte également l’inventaire du MOC avant de calculer le plan.</li>
   </ol>
+  <p class="tip"><strong>Il ne faut pas relancer l’extension entre deux recherches.</strong> Un set normal vient directement de l’API. Une révision ou un MOC déjà rencontré est relu depuis le cache ; seul son premier chargement ouvre automatiquement un onglet Rebrickable en arrière-plan.</p>
   <p class="tip">Le module utilise uniquement <strong>Export Parts → Rebrickable CSV</strong> dans des onglets inactifs. Il reproduit le formulaire d’export, sans parcourir les pages de pièces et sans accéder à votre mot de passe.</p>
 </main></body>
 </html>

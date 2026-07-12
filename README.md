@@ -16,9 +16,9 @@ L’API v3 de Rebrickable ne renvoie pas le champ `Location` affiché sur le sit
 
 Une pièce sans emplacement peut recevoir une case directement dans le résultat. Une pièce déjà localisée propose aussi **Changer de case**. Chaque modification est sauvegardée et recalcule immédiatement le plan.
 
-Chaque pièce ou case entière peut être cochée comme rangée. La progression est pondérée par la quantité réelle et sauvegardée dans `progress.local.json`, afin d’être partagée entre le PC et le téléphone. Les cases terminées quittent le plan actif mais restent accessibles dans **Rangées** pour corriger une erreur.
+Chaque pièce ou étape entière peut être cochée comme rangée. **Tout décocher** remet le modèle à zéro. La progression est pondérée par la quantité réelle et sauvegardée dans `progress.local.json`, afin d’être partagée entre le PC et le téléphone. Les cases terminées quittent le plan actif mais restent accessibles dans **Rangées** pour corriger une erreur.
 
-Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant et le conserve dans `set-inventories.local.json`.
+Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant lors de son premier chargement et le conserve dans `set-inventories.local.json`. Il n’est pas nécessaire de relancer l’extension entre deux recherches ; son bouton **Actualiser** ne sert qu’après une mise à jour de son code.
 
 ## Ordre de rangement
 

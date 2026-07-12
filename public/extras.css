@@ -12,6 +12,7 @@
 .import-panel strong,
 .import-panel span { display: block; }
 .import-panel span { margin-top: 3px; color: #68716d; font-size: 13px; }
+.import-panel small { display: block; margin-top: 5px; color: #68716d; font-size: 11px; }
 .import-panel .connected { color: var(--green); font-weight: 700; }
 .import-panel .failed { color: var(--red); font-weight: 700; }
 .file-button {
@@ -150,9 +151,13 @@ header::before { content: ""; position: absolute; width: 190px; height: 190px; r
 .completed-group .part.completed { background: #f3f6f4; }
 .completed-group .part.completed .part-info > b { text-decoration: line-through; text-decoration-thickness: 2px; }
 .filters [data-filter="completed"] { border: 1px dashed #8d9792; }
+#resetProgress { color: #8f2119; background: #fff1ef; border: 1px solid #e2aaa5; }
+.hero-brick { position: absolute; z-index: 2; width: clamp(220px, 29vw, 410px); right: max(4vw, 20px); top: 20px; transform: rotate(-7deg); filter: drop-shadow(0 20px 16px #002f5566); pointer-events: none; }
+header > .studs, header > .eyebrow, header > h1, header > p { position: relative; z-index: 3; }
 @media (max-width: 700px) {
   .model-heading { align-items: flex-start; }
   #modelImage { width: 82px; height: 70px; }
   .case-progress { margin: 0 -10px; padding: 9px 10px; flex-direction: column; align-items: stretch; }
   .case-progress button { width: 100%; }
+  .hero-brick { width: 170px; right: -35px; top: 12px; opacity: .42; }
 }

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 390" role="img" aria-labelledby="title desc">
+  <title id="title">Brique de construction rouge</title>
+  <desc id="desc">Illustration originale d’une brique à quatre tenons en perspective isométrique.</desc>
+  <defs>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff5147"/><stop offset="1" stop-color="#d71910"/></linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#c91b12"/><stop offset="1" stop-color="#8e0d08"/></linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#f12a20"/><stop offset="1" stop-color="#b3120b"/></linearGradient>
+    <radialGradient id="stud"><stop stop-color="#ff746b"/><stop offset=".72" stop-color="#e5281e"/><stop offset="1" stop-color="#aa100a"/></radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="8" dy="18" stdDeviation="15" flood-color="#001c33" flood-opacity=".38"/></filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path fill="url(#left)" d="M68 173 258 275v92L68 265Z"/>
+    <path fill="url(#right)" d="m258 275 198-114v92L258 367Z"/>
+    <path fill="url(#top)" d="M68 173 264 60l192 101-198 114Z"/>
+    <g fill="url(#stud)" stroke="#a80e09" stroke-width="4">
+      <ellipse cx="155" cy="154" rx="42" ry="23"/><path d="M113 153v-29c0-13 19-23 42-23s42 10 42 23v29"/><ellipse cx="155" cy="124" rx="42" ry="23"/>
+      <ellipse cx="247" cy="102" rx="42" ry="23"/><path d="M205 101V72c0-13 19-23 42-23s42 10 42 23v29"/><ellipse cx="247" cy="72" rx="42" ry="23"/>
+      <ellipse cx="249" cy="204" rx="42" ry="23"/><path d="M207 203v-29c0-13 19-23 42-23s42 10 42 23v29"/><ellipse cx="249" cy="174" rx="42" ry="23"/>
+      <ellipse cx="341" cy="151" rx="42" ry="23"/><path d="M299 150v-29c0-13 19-23 42-23s42 10 42 23v29"/><ellipse cx="341" cy="121" rx="42" ry="23"/>
+    </g>
+    <path fill="none" stroke="#ff8a83" stroke-width="9" stroke-linecap="round" opacity=".55" d="m93 171 170-97"/>
+  </g>
+</svg>

@@ -1,5 +1,5 @@
 (() => {
-  window.postMessage({ source: 'LEGO_RANGEMENT_EXTENSION', type: 'READY' }, location.origin);
+  window.postMessage({ source: 'LEGO_RANGEMENT_EXTENSION', type: 'READY', version: chrome.runtime.getManifest().version }, location.origin);
   window.addEventListener('message', event => {
     const message = event.data;
     if (event.source !== window || message?.source !== 'LEGO_RANGEMENT_APP' || message?.type !== 'SYNC') return;

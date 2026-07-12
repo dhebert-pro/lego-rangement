@@ -11,13 +11,22 @@ const setName = document.querySelector('#setName');
 const stats = document.querySelector('#stats');
 let rows = [], filter = 'all', userToken = '';
 let currentSetNum = '', currentInventory = null, panelsInitialized = false;
+let extensionVersion = '';
 const expandedPanels = new Set();
 const isLocalBrowser = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
 const pendingExtensionSync = new Map();
 
 window.addEventListener('message', event => {
   const message = event.data;
-  if (event.source !== window || message?.source !== 'LEGO_RANGEMENT_EXTENSION' || message?.type !== 'SYNC_RESULT') return;
+  if (event.source !== window || message?.source !== 'LEGO_RANGEMENT_EXTENSION') return;
+  if (message.type === 'READY') {
+    extensionVersion = message.version || '';
+    const status = document.querySelector('#importStatus');
+    status.className = 'connected';
+    status.textContent = `Extension ${extensionVersion || ''} active · synchronisation automatique, sans relance entre deux modèles.`;
+    return;
+  }
+  if (message.type !== 'SYNC_RESULT') return;
   const pending = pendingExtensionSync.get(message.requestId);
   if (!pending) return;
   pendingExtensionSync.delete(message.requestId);
@@ -101,11 +110,12 @@ function panelHtml({ key, caseClass = '', eyebrow, title, subtitle, extra = '', 
   return `<article class="group ${caseClass} ${expanded ? 'expanded' : 'collapsed'}" data-panel-key="${escapeHtml(key)}"><button type="button" class="case" data-toggle-panel data-panel-key="${escapeHtml(key)}" aria-expanded="${expanded}"><small>${eyebrow}</small><strong>${escapeHtml(title)}</strong><span>${subtitle}</span>${extra}<i class="panel-chevron" aria-hidden="true">⌄</i></button><div class="parts" ${expanded ? '' : 'hidden'}>${content}</div></article>`;
 }
 
-function caseProgressHtml(location) {
+function caseProgressHtml(visit) {
+  const location = visit.location;
   const caseRows = rows.filter(part => part.location === location);
   const done = caseRows.filter(part => part.completed).length;
-  const remaining = caseRows.filter(part => !part.completed);
-  return `<div class="case-progress"><span><b>${done}/${caseRows.length}</b> références rangées dans cette case</span>${remaining.length ? `<button type="button" data-complete-case="${escapeHtml(location)}">Ranger toute la case (${remaining.length})</button>` : '<strong>Case complètement rangée ✓</strong>'}</div>`;
+  const stepKeys = [...new Set(visit.parts.map(keyOf))];
+  return `<div class="case-progress"><span><b>${done}/${caseRows.length}</b> références rangées dans cette case</span><button type="button" data-complete-step="${escapeHtml(encodeURIComponent(JSON.stringify(stepKeys)))}">Ranger cette étape (${stepKeys.length})</button></div>`;
 }
 
 function completedPanels(term) {
@@ -147,7 +157,7 @@ function render() {
     const extra = visit.split ? `<em>Passage ${visit.visitIndex}/${visit.visitCount}</em>` : '';
     const note = visit.split ? `<p class="split-note">Cette case est ouverte en ${visit.visitCount} passages : ${escapeHtml(visit.splitReason)}.</p>` : '';
     const difficultyClass = visit.score < 36 ? 'easy-group' : visit.score < 61 ? 'medium-group' : 'hard-group';
-    return panelHtml({ key, caseClass: `planned-group ${difficultyClass}`, eyebrow: `ÉTAPE ${visit.step}`, title: visit.location, subtitle: visit.score < 36 ? 'Recherche facile' : visit.score < 61 ? 'Recherche intermédiaire' : 'Recherche minutieuse', extra, content: caseProgressHtml(visit.location) + note + visit.visibleParts.map(part => partHtml(part)).join(''), expanded: expandedPanels.has(key) });
+    return panelHtml({ key, caseClass: `planned-group ${difficultyClass}`, eyebrow: `ÉTAPE ${visit.step}`, title: visit.location, subtitle: visit.score < 36 ? 'Recherche facile' : visit.score < 61 ? 'Recherche intermédiaire' : 'Recherche minutieuse', extra, content: caseProgressHtml(visit) + note + visit.visibleParts.map(part => partHtml(part)).join(''), expanded: expandedPanels.has(key) });
   }).join('');
   const visibleMissing = plan.missing.filter(part => matchesSearch(part, term));
   const missing = visibleMissing.length ? panelHtml({ key: 'missing', caseClass: 'missing', eyebrow: 'À ATTRIBUER', title: 'Sans case', subtitle: `${visibleMissing.length} référence${visibleMissing.length > 1 ? 's' : ''}`, content: visibleMissing.map(part => partHtml(part, true)).join(''), expanded: expandedPanels.has('missing') }) : '';
@@ -161,7 +171,9 @@ function updateStats() {
   const rawPercent = totalPieces ? completedPieces * 100 / totalPieces : 0;
   const percent = rawPercent > 0 && rawPercent < 10 ? Number(rawPercent.toFixed(1)) : Math.round(rawPercent);
   stats.innerHTML = `<div class="location-stat"><strong>${located}/${rows.length}</strong><span>références localisées</span></div><div class="progress-stat"><div><strong>${percent}%</strong><span>${completedPieces}/${totalPieces} pièces rangées</span></div><progress value="${completedPieces}" max="${Math.max(totalPieces, 1)}" aria-label="Progression du rangement">${percent}%</progress></div>`;
-  document.querySelector('#completedFilter').textContent = `Rangées (${rows.filter(part => part.completed).length})`;
+  const completedCount = rows.filter(part => part.completed).length;
+  document.querySelector('#completedFilter').textContent = `Rangées (${completedCount})`;
+  document.querySelector('#resetProgress').hidden = completedCount === 0;
 }
 
 async function persistProgress(partKeys, completed) {
@@ -174,13 +186,13 @@ async function persistProgress(partKeys, completed) {
 }
 
 groups.addEventListener('click', async event => {
-  const completeCaseButton = event.target.closest('[data-complete-case]');
-  if (completeCaseButton) {
-    const location = completeCaseButton.dataset.completeCase;
-    const affected = rows.filter(part => part.location === location && !part.completed).map(keyOf);
+  const completeStepButton = event.target.closest('[data-complete-step]');
+  if (completeStepButton) {
+    const affected = JSON.parse(decodeURIComponent(completeStepButton.dataset.completeStep));
     if (!affected.length) return;
+    const affectedSet = new Set(affected);
     const previous = rows;
-    rows = rows.map(part => part.location === location ? { ...part, completed: true } : part);
+    rows = rows.map(part => affectedSet.has(keyOf(part)) ? { ...part, completed: true } : part);
     updateStats(); render();
     try { await persistProgress(affected, true); }
     catch (error) { rows = previous; updateStats(); render(); window.alert(`Progression non enregistrée : ${error.message}`); }
@@ -223,6 +235,19 @@ groups.addEventListener('click', async event => {
   }
 });
 
+document.querySelector('#resetProgress').addEventListener('click', async () => {
+  const affected = [...new Set(rows.filter(part => part.completed).map(keyOf))];
+  if (!affected.length || !window.confirm(`Décocher les ${affected.length} références rangées de ce modèle ?`)) return;
+  const previous = rows;
+  rows = rows.map(part => ({ ...part, completed: false }));
+  filter = 'all';
+  document.querySelectorAll('[data-filter]').forEach(button => button.classList.toggle('active', button.dataset.filter === 'all'));
+  expandedPanels.clear(); panelsInitialized = false;
+  updateStats(); render();
+  try { await persistProgress(affected, false); }
+  catch (error) { rows = previous; updateStats(); render(); window.alert(`Progression non enregistrée : ${error.message}`); }
+});
+
 groups.addEventListener('change', async event => {
   const checkbox = event.target.closest('[data-toggle-complete]');
   if (!checkbox) return;
@@ -252,16 +277,20 @@ form.addEventListener('submit', async event => {
     if (!userToken) throw new Error('Connectez-vous d’abord à Rebrickable.');
     let requestedInventory = null, modelMode = 'set';
     try { const requestedUrl = new URL(setUrl.value); requestedInventory = requestedUrl.searchParams.get('inventory'); modelMode = requestedUrl.pathname.startsWith('/mocs/') ? 'moc' : 'set'; } catch {}
-    if (requestedInventory) {
-      state.querySelector('p').textContent = `Synchronisation de l’inventaire ${requestedInventory} demandé…`;
-      try { await syncViaExtension('set', setUrl.value); } catch {}
+    const requestLocations = async () => {
+      const response = await fetch('/api/locations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setUrl: setUrl.value, apiKey: apiKey.value, userToken, partListId: partListId.value }) });
+      return { response, data: await response.json() };
+    };
+    let { response, data } = await requestLocations();
+    if (response.status === 409 && (requestedInventory || modelMode === 'moc')) {
+      state.querySelector('p').textContent = modelMode === 'moc' ? 'Premier chargement du MOC : export automatique en arrière-plan…' : `Premier chargement de l’inventaire ${requestedInventory}…`;
+      try {
+        await syncViaExtension(modelMode, setUrl.value);
+      } catch (syncError) {
+        throw new Error(`${data.error} L’extension n’a pas répondu (${syncError.message}). Sur le PC, actualisez-la une fois depuis chrome://extensions.`);
+      }
+      ({ response, data } = await requestLocations());
     }
-    if (modelMode === 'moc') {
-      state.querySelector('p').textContent = 'Synchronisation de l’inventaire du MOC via Rebrickable…';
-      try { await syncViaExtension('moc', setUrl.value); } catch {}
-    }
-    const response = await fetch('/api/locations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setUrl: setUrl.value, apiKey: apiKey.value, userToken, partListId: partListId.value }) });
-    const data = await response.json();
     if (!response.ok) throw new Error(data.error);
     currentSetNum = data.set.set_num;
     currentInventory = data.inventory;
