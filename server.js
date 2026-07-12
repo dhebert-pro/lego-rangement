@@ -353,6 +353,36 @@ function importSetInventory(sourceUrl, content) {
   return { count: parts.length, setNum, inventory };
 }
 
+function cleanModel(value) {
+  const text = String(value || '');
+  const moc = text.match(/(?:mocs\/)?(MOC-\d+)/i);
+  if (moc) return { type: 'moc', id: moc[1].toUpperCase() };
+  return { type: 'set', id: cleanSetNumber(text) };
+}
+
+function withoutSpares(parts) {
+  return (parts || []).filter(part => !part?.is_spare && !part?.isSpare);
+}
+
+function importModelInventory(sourceUrl, content, metadata = {}) {
+  const model = cleanModel(sourceUrl);
+  if (model.type !== 'moc') throw new Error('Ce lien n’est pas un MOC Rebrickable.');
+  const parts = setPartsFromCsv(content);
+  if (!parts.length) throw new Error('Aucune pièce hors spare trouvée dans l’export du MOC.');
+  const cache = readJson(SET_INVENTORIES_PATH, { inventories: {}, models: {} });
+  cache.models ||= {};
+  cache.models[model.id] = {
+    modelId: model.id,
+    sourceUrl,
+    importedAt: new Date().toISOString(),
+    name: String(metadata.name || model.id).trim(),
+    imageUrl: String(metadata.imageUrl || '').trim(),
+    parts
+  };
+  fs.writeFileSync(SET_INVENTORIES_PATH, `${JSON.stringify(cache, null, 2)}\n`, 'utf8');
+  return { count: parts.length, modelId: model.id };
+}
+
 function importLocationMappings(input) {
   const mappings = (Array.isArray(input) ? input : []).map(item => ({
     partNum: String(item.partNum || '').trim(),
@@ -403,15 +433,16 @@ function completedWithChange(values, partKey, completed) {
 }
 
 function updateProgress(input) {
-  const setNum = cleanSetNumber(input.setNum);
+  const setNum = cleanModel(input.setNum).id;
   const inventory = input.inventory == null || input.inventory === '' ? null : Number(input.inventory);
   if (inventory != null && (!Number.isInteger(inventory) || inventory < 0)) throw new Error('Version d’inventaire invalide.');
-  const partKey = String(input.partKey || '').trim();
-  if (!partKey || partKey.length > 200 || !partKey.includes('|')) throw new Error('Référence de pièce invalide.');
+  const partKeys = (Array.isArray(input.partKeys) ? input.partKeys : [input.partKey]).map(value => String(value || '').trim());
+  if (!partKeys.length || partKeys.some(partKey => !partKey || partKey.length > 200 || !partKey.includes('|'))) throw new Error('Référence de pièce invalide.');
   const progress = readJson(PROGRESS_PATH, { sets: {} });
   progress.sets ||= {};
   const key = progressSetKey(setNum, inventory);
-  const completed = completedWithChange(progress.sets[key]?.completed, partKey, Boolean(input.completed));
+  let completed = progress.sets[key]?.completed || [];
+  partKeys.forEach(partKey => { completed = completedWithChange(completed, partKey, Boolean(input.completed)); });
   progress.sets[key] = { updatedAt: new Date().toISOString(), completed };
   fs.writeFileSync(PROGRESS_PATH, `${JSON.stringify(progress, null, 2)}\n`, 'utf8');
   return progress.sets[key];
@@ -526,6 +557,24 @@ function cleanSetNumber(value) {
   return match[1];
 }
 
+async function mocPartsFromCache(cached, base, apiKey) {
+  const partNums = [...new Set(cached.parts.map(item => item.partNum))];
+  const details = [];
+  for (let offset = 0; offset < partNums.length; offset += 100) {
+    const query = encodeURIComponent(partNums.slice(offset, offset + 100).join(','));
+    details.push(...await getAll(`${base}/lego/parts/?part_nums=${query}&page_size=1000&inc_part_details=1`, apiKey));
+  }
+  const colors = await getAll(`${base}/lego/colors/?page_size=500`, apiKey);
+  const byPart = new Map(details.map(part => [String(part.part_num), part]));
+  const byColor = new Map(colors.map(color => [Number(color.id), color]));
+  return cached.parts.map(item => ({
+    part: byPart.get(item.partNum) || { part_num: item.partNum, name: item.partNum },
+    color: byColor.get(Number(item.colorId)) || { id: Number(item.colorId), name: `Couleur ${item.colorId}` },
+    quantity: item.quantity,
+    is_spare: false
+  }));
+}
+
 async function api(req, res) {
   let raw = '';
   for await (const chunk of req) raw += chunk;
@@ -537,23 +586,33 @@ async function api(req, res) {
   if (!userToken) return send(res, 400, { error: 'Ajoutez votre jeton utilisateur Rebrickable.' });
 
   try {
-    const setNum = cleanSetNumber(input.setUrl);
+    const model = cleanModel(input.setUrl);
+    const setNum = model.id;
     const base = 'https://rebrickable.com/api/v3';
-    const set = await requestJson(`${base}/lego/sets/${encodeURIComponent(setNum)}/`, apiKey);
-    const catalogParts = await getAll(`${base}/lego/sets/${encodeURIComponent(setNum)}/parts/?page_size=500&inc_spares=0&inc_minifig_parts=1&inc_part_details=1`, apiKey);
-    const inventory = inventoryFromUrl(input.setUrl);
-    let setParts = catalogParts;
-    if (inventory != null) {
-      const cached = readJson(SET_INVENTORIES_PATH).inventories?.[`${setNum}|${inventory}`];
-      if (!cached) return send(res, 409, { error: `La version d’inventaire ${inventory} n’est pas encore synchronisée par l’extension.` });
-      const details = new Map(catalogParts.map(part => [`${part.part?.part_num}|${part.color?.id}`, part]));
-      setParts = cached.parts.map(item => {
-        const detail = details.get(`${item.partNum}|${item.colorId}`);
-        return detail ? { ...detail, quantity: item.quantity, is_spare: false } : { part: { part_num: item.partNum, name: item.partNum }, color: { id: item.colorId, name: `Couleur ${item.colorId}` }, quantity: item.quantity, is_spare: false };
-      });
+    const inventory = model.type === 'set' ? inventoryFromUrl(input.setUrl) : null;
+    let set, setParts;
+    if (model.type === 'moc') {
+      const cached = readJson(SET_INVENTORIES_PATH).models?.[setNum];
+      if (!cached) return send(res, 409, { error: `Le MOC ${setNum} n’est pas encore synchronisé. Rechargez l’extension Chrome puis relancez la recherche depuis le PC.` });
+      set = { set_num: setNum, name: cached.name || setNum, set_img_url: cached.imageUrl || '' };
+      setParts = await mocPartsFromCache(cached, base, apiKey);
+    } else {
+      set = await requestJson(`${base}/lego/sets/${encodeURIComponent(setNum)}/`, apiKey);
+      const catalogParts = withoutSpares(await getAll(`${base}/lego/sets/${encodeURIComponent(setNum)}/parts/?page_size=500&inc_spares=0&inc_minifig_parts=1&inc_part_details=1`, apiKey));
+      setParts = catalogParts;
+      if (inventory != null) {
+        const cached = readJson(SET_INVENTORIES_PATH).inventories?.[`${setNum}|${inventory}`];
+        if (!cached) return send(res, 409, { error: `La version d’inventaire ${inventory} n’est pas encore synchronisée par l’extension.` });
+        const details = new Map(catalogParts.map(part => [`${part.part?.part_num}|${part.color?.id}`, part]));
+        setParts = cached.parts.map(item => {
+          const detail = details.get(`${item.partNum}|${item.colorId}`);
+          return detail ? { ...detail, quantity: item.quantity, is_spare: false } : { part: { part_num: item.partNum, name: item.partNum }, color: { id: item.colorId, name: `Couleur ${item.colorId}` }, quantity: item.quantity, is_spare: false };
+        });
+      }
     }
+    setParts = withoutSpares(setParts);
     const physicalData = enrichWithPhysicalData(setParts);
-    setParts = physicalData.parts;
+    setParts = withoutSpares(physicalData.parts);
     const locationImport = readJson(LOCATIONS_PATH);
     const importedMappings = locationImport.mappings || [];
     let storedParts;
@@ -567,7 +626,7 @@ async function api(req, res) {
       const partListId = Number(input.partListId || local.partListId || 108467);
       storedParts = addImportedLocations(await getAll(`${base}/users/${encodeURIComponent(userToken)}/partlists/${partListId}/parts/?page_size=500`, apiKey));
     }
-    send(res, 200, { set, setParts, storedParts, inventory, progress: progressFor(setNum, inventory), physicalData: physicalData.status, locationImport: { count: locationImport.mappings?.length || 0, importedAt: locationImport.importedAt || null } });
+    send(res, 200, { set, modelType: model.type, setParts, storedParts, inventory, progress: progressFor(setNum, inventory), physicalData: physicalData.status, locationImport: { count: locationImport.mappings?.length || 0, importedAt: locationImport.importedAt || null } });
   } catch (error) {
     send(res, error.status || 500, { error: error.message || 'Erreur inattendue.' });
   }
@@ -608,6 +667,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, importSetInventory(input.sourceUrl, input.content || ''));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
+  if (req.method === 'POST' && req.url === '/api/model-inventory/import') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      const input = JSON.parse(raw || '{}');
+      return send(res, 200, importModelInventory(input.sourceUrl, input.content || '', input.metadata));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
   if (req.method === 'POST' && req.url === '/api/locations/assign') {
     try {
       let raw = ''; for await (const chunk of req) raw += chunk;
@@ -640,4 +706,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange, networkUrls, server };

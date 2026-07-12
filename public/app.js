@@ -101,9 +101,37 @@ function panelHtml({ key, caseClass = '', eyebrow, title, subtitle, extra = '', 
   return `<article class="group ${caseClass} ${expanded ? 'expanded' : 'collapsed'}" data-panel-key="${escapeHtml(key)}"><button type="button" class="case" data-toggle-panel data-panel-key="${escapeHtml(key)}" aria-expanded="${expanded}"><small>${eyebrow}</small><strong>${escapeHtml(title)}</strong><span>${subtitle}</span>${extra}<i class="panel-chevron" aria-hidden="true">⌄</i></button><div class="parts" ${expanded ? '' : 'hidden'}>${content}</div></article>`;
 }
 
+function caseProgressHtml(location) {
+  const caseRows = rows.filter(part => part.location === location);
+  const done = caseRows.filter(part => part.completed).length;
+  const remaining = caseRows.filter(part => !part.completed);
+  return `<div class="case-progress"><span><b>${done}/${caseRows.length}</b> références rangées dans cette case</span>${remaining.length ? `<button type="button" data-complete-case="${escapeHtml(location)}">Ranger toute la case (${remaining.length})</button>` : '<strong>Case complètement rangée ✓</strong>'}</div>`;
+}
+
+function completedPanels(term) {
+  const completed = rows.filter(part => part.completed && matchesSearch(part, term));
+  if (!completed.length) return '<p class="no-result">Aucune pièce rangée pour le moment.</p>';
+  const byCase = new Map();
+  completed.forEach(part => {
+    const location = part.location || 'Sans case';
+    byCase.set(location, [...(byCase.get(location) || []), part]);
+  });
+  return [...byCase].sort(([a], [b]) => a.localeCompare(b, 'fr', { numeric: true })).map(([location, parts]) => {
+    const allCaseRows = rows.filter(part => (part.location || 'Sans case') === location);
+    const complete = allCaseRows.length === parts.length && allCaseRows.every(part => part.completed);
+    const key = `done|${location}`;
+    return panelHtml({ key, caseClass: `completed-group ${complete ? 'case-complete' : ''}`, eyebrow: complete ? 'CASE TERMINÉE ✓' : 'DÉJÀ RANGÉES', title: location, subtitle: `${parts.length}/${allCaseRows.length} références · cliquez sur une coche pour corriger`, content: parts.map(part => partHtml(part, !part.location)).join(''), expanded: expandedPanels.has(key) });
+  }).join('');
+}
+
 function render() {
   const term = document.querySelector('#search').value.toLowerCase();
-  const plan = LegoPlanner.buildStoragePlan(rows);
+  if (filter === 'completed') {
+    groups.innerHTML = completedPanels(term);
+    return;
+  }
+  const remainingRows = rows.filter(part => !part.completed);
+  const plan = LegoPlanner.buildStoragePlan(remainingRows);
   if (!panelsInitialized) {
     const firstIncomplete = plan.visits.find(visit => visit.parts.some(part => !part.completed)) || plan.visits[0];
     if (firstIncomplete) expandedPanels.add(panelKeyOf(firstIncomplete));
@@ -118,7 +146,8 @@ function render() {
     const key = panelKeyOf(visit);
     const extra = visit.split ? `<em>Passage ${visit.visitIndex}/${visit.visitCount}</em>` : '';
     const note = visit.split ? `<p class="split-note">Cette case est ouverte en ${visit.visitCount} passages : ${escapeHtml(visit.splitReason)}.</p>` : '';
-    return panelHtml({ key, caseClass: 'planned-group', eyebrow: `ÉTAPE ${visit.step}`, title: visit.location, subtitle: visit.score < 36 ? 'Recherche facile' : visit.score < 61 ? 'Recherche intermédiaire' : 'Recherche minutieuse', extra, content: note + visit.visibleParts.map(part => partHtml(part)).join(''), expanded: expandedPanels.has(key) });
+    const difficultyClass = visit.score < 36 ? 'easy-group' : visit.score < 61 ? 'medium-group' : 'hard-group';
+    return panelHtml({ key, caseClass: `planned-group ${difficultyClass}`, eyebrow: `ÉTAPE ${visit.step}`, title: visit.location, subtitle: visit.score < 36 ? 'Recherche facile' : visit.score < 61 ? 'Recherche intermédiaire' : 'Recherche minutieuse', extra, content: caseProgressHtml(visit.location) + note + visit.visibleParts.map(part => partHtml(part)).join(''), expanded: expandedPanels.has(key) });
   }).join('');
   const visibleMissing = plan.missing.filter(part => matchesSearch(part, term));
   const missing = visibleMissing.length ? panelHtml({ key: 'missing', caseClass: 'missing', eyebrow: 'À ATTRIBUER', title: 'Sans case', subtitle: `${visibleMissing.length} référence${visibleMissing.length > 1 ? 's' : ''}`, content: visibleMissing.map(part => partHtml(part, true)).join(''), expanded: expandedPanels.has('missing') }) : '';
@@ -132,9 +161,31 @@ function updateStats() {
   const rawPercent = totalPieces ? completedPieces * 100 / totalPieces : 0;
   const percent = rawPercent > 0 && rawPercent < 10 ? Number(rawPercent.toFixed(1)) : Math.round(rawPercent);
   stats.innerHTML = `<div class="location-stat"><strong>${located}/${rows.length}</strong><span>références localisées</span></div><div class="progress-stat"><div><strong>${percent}%</strong><span>${completedPieces}/${totalPieces} pièces rangées</span></div><progress value="${completedPieces}" max="${Math.max(totalPieces, 1)}" aria-label="Progression du rangement">${percent}%</progress></div>`;
+  document.querySelector('#completedFilter').textContent = `Rangées (${rows.filter(part => part.completed).length})`;
+}
+
+async function persistProgress(partKeys, completed) {
+  const response = await fetch('/api/progress', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ setNum: currentSetNum, inventory: currentInventory, partKeys, completed })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error);
 }
 
 groups.addEventListener('click', async event => {
+  const completeCaseButton = event.target.closest('[data-complete-case]');
+  if (completeCaseButton) {
+    const location = completeCaseButton.dataset.completeCase;
+    const affected = rows.filter(part => part.location === location && !part.completed).map(keyOf);
+    if (!affected.length) return;
+    const previous = rows;
+    rows = rows.map(part => part.location === location ? { ...part, completed: true } : part);
+    updateStats(); render();
+    try { await persistProgress(affected, true); }
+    catch (error) { rows = previous; updateStats(); render(); window.alert(`Progression non enregistrée : ${error.message}`); }
+    return;
+  }
   const panelButton = event.target.closest('[data-toggle-panel]');
   if (panelButton) {
     const key = panelButton.dataset.panelKey;
@@ -182,12 +233,7 @@ groups.addEventListener('change', async event => {
   updateStats();
   render();
   try {
-    const response = await fetch('/api/progress', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ setNum: currentSetNum, inventory: currentInventory, partKey, completed })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
+    await persistProgress([partKey], completed);
   } catch (error) {
     rows = previous;
     updateStats();
@@ -204,11 +250,15 @@ form.addEventListener('submit', async event => {
     state.innerHTML = '<div class="spinner"></div><h2>Inventaire en cours…</h2><p>Comparaison du set et calcul des encombrements LDraw mis en cache.</p>';
   try {
     if (!userToken) throw new Error('Connectez-vous d’abord à Rebrickable.');
-    let requestedInventory = null;
-    try { requestedInventory = new URL(setUrl.value).searchParams.get('inventory'); } catch {}
+    let requestedInventory = null, modelMode = 'set';
+    try { const requestedUrl = new URL(setUrl.value); requestedInventory = requestedUrl.searchParams.get('inventory'); modelMode = requestedUrl.pathname.startsWith('/mocs/') ? 'moc' : 'set'; } catch {}
     if (requestedInventory) {
       state.querySelector('p').textContent = `Synchronisation de l’inventaire ${requestedInventory} demandé…`;
       try { await syncViaExtension('set', setUrl.value); } catch {}
+    }
+    if (modelMode === 'moc') {
+      state.querySelector('p').textContent = 'Synchronisation de l’inventaire du MOC via Rebrickable…';
+      try { await syncViaExtension('moc', setUrl.value); } catch {}
     }
     const response = await fetch('/api/locations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setUrl: setUrl.value, apiKey: apiKey.value, userToken, partListId: partListId.value }) });
     const data = await response.json();
@@ -216,10 +266,14 @@ form.addEventListener('submit', async event => {
     currentSetNum = data.set.set_num;
     currentInventory = data.inventory;
     const completed = new Set(data.progress?.completed || []);
-    rows = mergeParts(data.setParts, data.storedParts).map(part => ({ ...part, completed: completed.has(keyOf(part)) }));
+    rows = mergeParts(data.setParts.filter(part => !part.is_spare && !part.isSpare), data.storedParts).map(part => ({ ...part, completed: completed.has(keyOf(part)) }));
     expandedPanels.clear();
     panelsInitialized = false;
     setName.textContent = `${data.set.set_num} · ${data.set.name}${data.inventory != null ? ` · inventaire ${data.inventory}` : ''}`;
+    const modelImage = document.querySelector('#modelImage');
+    modelImage.hidden = !data.set.set_img_url;
+    modelImage.src = data.set.set_img_url || '';
+    modelImage.alt = data.set.set_img_url ? `Image de ${data.set.name}` : '';
     updateStats();
     const locationNotice = document.querySelector('#locationNotice');
     const located = rows.filter(part => part.location).length;
@@ -291,7 +345,7 @@ async function autoLogin() {
     importStatus.textContent = 'Synchronisation automatique de la part list…';
     if (config.local) {
       syncViaExtension('locations', 'https://rebrickable.com/users/sourivore/partlists/108467/')
-        .then(result => { importStatus.className = 'connected'; importStatus.textContent = `${result.count} emplacements synchronisés automatiquement.`; })
+        .then(result => { importStatus.className = 'connected'; importStatus.textContent = result.skipped ? `${config.locationCount || 0} emplacements locaux à jour.` : `${result.count} emplacements synchronisés automatiquement.`; })
         .catch(error => { importStatus.textContent = config.locationCount ? `${config.locationCount} emplacements locaux disponibles.` : error.message; });
     } else {
       document.querySelector('#connection').hidden = true;

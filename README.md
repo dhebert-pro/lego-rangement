@@ -1,6 +1,6 @@
 # LEGO Rangement
 
-Application locale qui croise l’inventaire d’un set Rebrickable avec la part list `108467`, indique la case de chaque pièce et construit un ordre de rangement.
+Application locale qui croise l’inventaire d’un set ou d’un MOC Rebrickable avec la part list `108467`, indique la case de chaque pièce et construit un ordre de rangement.
 
 ## Démarrage
 
@@ -16,9 +16,9 @@ L’API v3 de Rebrickable ne renvoie pas le champ `Location` affiché sur le sit
 
 Une pièce sans emplacement peut recevoir une case directement dans le résultat. Une pièce déjà localisée propose aussi **Changer de case**. Chaque modification est sauvegardée et recalcule immédiatement le plan.
 
-Chaque lot de pièces peut être coché comme rangé. La progression est pondérée par la quantité réelle et sauvegardée dans `progress.local.json`, afin d’être partagée entre le PC et le téléphone.
+Chaque pièce ou case entière peut être cochée comme rangée. La progression est pondérée par la quantité réelle et sauvegardée dans `progress.local.json`, afin d’être partagée entre le PC et le téléphone. Les cases terminées quittent le plan actif mais restent accessibles dans **Rangées** pour corriger une erreur.
 
-Le module Chrome 2.x synchronise automatiquement la part list `108467`. Un lien de set contenant `inventory=N` déclenche l’export de cette révision exacte et la conserve dans `set-inventories.local.json`.
+Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant et le conserve dans `set-inventories.local.json`.
 
 ## Ordre de rangement
 
@@ -26,13 +26,13 @@ Le nom de la pièce n’est jamais utilisé pour estimer sa forme ou sa taille. 
 
 - les trois dimensions calculées depuis la géométrie 3D officielle LDraw ;
 - le volume, l’allongement et la finesse déduits de cette géométrie ;
-- la couleur structurée et la quantité dans le set.
+- la couleur structurée, la quantité, la catégorie et la ressemblance avec les pièces restant réellement à chercher.
 
 Rebrickable fournit la correspondance vers LDraw dans `external_ids.LDraw`. Le fichier embarqué `data/ldraw-dimensions.json` contient les boîtes englobantes calculées depuis les sommets et sous-pièces de la bibliothèque officielle LDraw. Il couvre plus de 24 000 références et évite tout appel réseau au lancement.
 
 Si BrickLink Studio a déjà créé son cache catalogue local, l’application y lit également le poids. Ce cache est facultatif : aucun compte vendeur et aucune clé API ne sont nécessaires.
 
-Les pièces faciles à repérer sont proposées en premier. Les références d’une même case restent regroupées, sauf lorsqu’un écart important de difficulté compense le coût d’une seconde ouverture. Dans ce cas, le plan affiche explicitement deux passages.
+Les pièces faciles à repérer sont proposées en premier et le plan est recalculé après chaque coche. Une case est classée selon sa pièce la plus difficile. Ses références restent regroupées, sauf lorsqu’un écart important de difficulté compense le coût d’une nouvelle ouverture ; jusqu’à trois passages peuvent alors être affichés explicitement.
 
 Les panneaux de cases sont repliables. Des indicateurs signalent aussi lorsqu’une étape regroupe toutes les couleurs d’une même forme, toutes les formes d’une même couleur, ou les deux. Les pièces imprimées utilisent `print_of` pour retrouver leur forme de base.
 

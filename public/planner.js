@@ -31,23 +31,47 @@
     };
   }
 
-  function pieceDifficulty(part) {
+  function dimensionsClose(left, right) {
+    if (!left.available || !right.available) return false;
+    return left.dimensions.every((value, index) => Math.abs(value - right.dimensions[index]) <= Math.max(0.18, Math.max(value, right.dimensions[index]) * 0.22));
+  }
+
+  function planningContext(rows) {
+    const profiles = rows.map(physicalProfile);
+    const categories = new Map();
+    rows.forEach(row => {
+      const category = row.part?.part_cat_id;
+      if (category != null) categories.set(category, (categories.get(category) || 0) + 1);
+    });
+    return { rows, profiles, categories };
+  }
+
+  function pieceDifficulty(part, context = null, rowIndex = -1) {
     const physical = physicalProfile(part);
     const quantity = Math.max(1, Number(part.quantity) || 1);
-    let score = 82;
+    let score = 78;
     const reasons = [];
     if (physical.available) {
-      if (physical.volumeCm3 != null) score -= clamp(Math.log1p(physical.volumeCm3) * 9, 0, 30);
-      if (physical.longestCm != null) score -= clamp(Math.log1p(physical.longestCm) * 7, 0, 18);
-      if (physical.weightG != null) score -= clamp(Math.log1p(physical.weightG) * 3, 0, 10);
-      if (physical.slenderness >= 5) { score -= 10; reasons.push('forme longue et fine'); }
-      else if (physical.flatness != null && physical.flatness <= 0.16) { score -= 7; reasons.push('forme très plate'); }
-      else if ((physical.volumeCm3 || 0) >= 8) reasons.push('gros volume');
+      if (physical.volumeCm3 != null) score -= clamp(Math.log1p(physical.volumeCm3) * 11, 0, 36);
+      if (physical.longestCm != null) score -= clamp(Math.log1p(physical.longestCm) * 5, 0, 14);
+      if (physical.weightG != null) score -= clamp(Math.log1p(physical.weightG) * 2, 0, 8);
+      if (physical.slenderness >= 5) { score += 7; reasons.push('longue et fine, facile à confondre'); }
+      else if (physical.flatness != null && physical.flatness <= 0.16) { score += 8; reasons.push('très plate, facile à confondre'); }
+      else if ((physical.volumeCm3 || 0) >= 8) reasons.push('gros volume bien visible');
       else if ((physical.volumeCm3 || Infinity) < 0.5) reasons.push('très petite pièce');
       else reasons.push('gabarit LDraw connu');
+      if (context) {
+        const similar = context.profiles.filter((candidate, index) => index !== rowIndex && dimensionsClose(physical, candidate)).length;
+        if (similar) { score += clamp(Math.log2(similar + 1) * 8, 0, 22); reasons.push(`${similar} gabarit${similar > 1 ? 's' : ''} proche${similar > 1 ? 's' : ''} restant${similar > 1 ? 's' : ''}`); }
+        else { score -= 7; reasons.push('silhouette unique dans le vrac restant'); }
+      }
     } else {
       score += 10;
       reasons.push('géométrie LDraw manquante');
+    }
+    if (context && part.part?.part_cat_id != null) {
+      const categoryCount = context.categories.get(part.part.part_cat_id) || 1;
+      if (categoryCount > 3) { score += clamp(Math.log2(categoryCount) * 3, 0, 13); reasons.push('famille de pièces encore nombreuse'); }
     }
     const color = rgbProfile(part.color?.rgb);
     if (color) {
@@ -55,9 +79,9 @@
       score -= colorBonus;
       if (color.saturation >= 0.55) reasons.push('couleur contrastée');
     }
-    const quantityBonus = clamp(Math.log2(quantity + 1) * 5, 0, 18);
-    score -= quantityBonus;
-    if (quantity >= 8) reasons.push('nombreux exemplaires');
+    const quantityCost = clamp(Math.log2(quantity + 1) * 1.5, 0, 8);
+    score += quantityCost;
+    if (quantity >= 8) reasons.push('plusieurs exemplaires à repérer');
     score = Math.round(clamp(score, 5, 99));
     return {
       score,
@@ -74,20 +98,22 @@
 
   function visitsForCase(location, rows) {
     const ordered = rows.slice().sort((a, b) => a.sorting.score - b.sorting.score);
-    let splitAt = -1, largestGap = 0;
+    const reopeningCost = 14;
+    const cuts = [];
     for (let index = 1; index < ordered.length; index += 1) {
       const gap = ordered[index].sorting.score - ordered[index - 1].sorting.score;
-      const bothMeasured = ordered.slice(0, index).some(row => row.sorting.physical.available) && ordered.slice(index).some(row => row.sorting.physical.available);
-      if (bothMeasured && gap > largestGap) { largestGap = gap; splitAt = index; }
+      if (gap > reopeningCost + 4) cuts.push({ index, gap });
     }
-    const reopeningCost = 14;
-    const groups = splitAt > 0 && largestGap > reopeningCost + 7
-      ? [ordered.slice(0, splitAt), ordered.slice(splitAt)]
-      : [ordered];
+    const selected = cuts.sort((a, b) => b.gap - a.gap).slice(0, 2).sort((a, b) => a.index - b.index);
+    const groups = [];
+    let start = 0;
+    selected.forEach(cut => { groups.push(ordered.slice(start, cut.index)); start = cut.index; });
+    groups.push(ordered.slice(start));
+    const largestGap = selected[0]?.gap || 0;
     return groups.map((parts, index) => ({
       location,
       parts,
-      score: Math.round(weightedDifficulty(parts)),
+      score: Math.round(Math.max(...parts.map(row => row.sorting.score)) * 0.82 + weightedDifficulty(parts) * 0.18),
       split: groups.length > 1,
       visitIndex: index + 1,
       visitCount: groups.length,
@@ -127,7 +153,8 @@
   }
 
   function buildStoragePlan(inputRows) {
-    const rows = inputRows.map((row, index) => ({ ...row, planId: index, sorting: pieceDifficulty(row) }));
+    const context = planningContext(inputRows);
+    const rows = inputRows.map((row, index) => ({ ...row, planId: index, sorting: pieceDifficulty(row, context, index) }));
     const missing = rows.filter(row => !String(row.location || '').trim()).sort((a, b) => a.sorting.score - b.sorting.score);
     const cases = new Map();
     rows.filter(row => String(row.location || '').trim()).forEach(row => {

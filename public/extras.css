@@ -129,3 +129,30 @@ button.case { width: 100%; min-width: 0; border-radius: 0; text-align: left; whi
   .network-access { padding: 14px; }
   .network-access a { font-size: 16px; }
 }
+
+/* Palette de briques et états de rangement */
+:root { --blue: #006db7; --yellow: #ffd500; --red: #da291c; --green: #16854f; }
+header { background: linear-gradient(118deg, var(--blue) 0 71%, #005494 71%); border-bottom: 12px solid var(--red); }
+header::before { content: ""; position: absolute; width: 190px; height: 190px; right: 18%; bottom: -145px; border-radius: 24px; background: var(--yellow); transform: rotate(18deg); }
+.model-heading { display: flex; align-items: center; gap: 18px; }
+#modelImage { width: 112px; height: 88px; object-fit: contain; padding: 7px; border: 4px solid var(--yellow); border-radius: 10px; background: white; box-shadow: 6px 6px 0 var(--blue); }
+.planned-group.easy-group .case { background: var(--blue); }
+.planned-group.medium-group .case { background: #bd8400; }
+.planned-group.hard-group .case { background: var(--red); }
+.case-progress { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 -20px; padding: 9px 20px; background: #edf6ff; border-bottom: 1px solid #c9dfef; }
+.case-progress span { color: #40505b; font-size: 12px; }
+.case-progress button { min-height: 38px; padding: 0 13px; background: var(--blue); color: white; }
+.case-progress strong { color: var(--green); }
+.completed-group { opacity: .72; border-style: dashed; }
+.completed-group:hover, .completed-group.expanded { opacity: 1; }
+.completed-group .case { background: #52615a; }
+.completed-group.case-complete .case { background: var(--green); }
+.completed-group .part.completed { background: #f3f6f4; }
+.completed-group .part.completed .part-info > b { text-decoration: line-through; text-decoration-thickness: 2px; }
+.filters [data-filter="completed"] { border: 1px dashed #8d9792; }
+@media (max-width: 700px) {
+  .model-heading { align-items: flex-start; }
+  #modelImage { width: 82px; height: 70px; }
+  .case-progress { margin: 0 -10px; padding: 9px 10px; flex-direction: column; align-items: stretch; }
+  .case-progress button { width: 100%; }
+}

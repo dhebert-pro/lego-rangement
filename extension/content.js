@@ -91,9 +91,15 @@
       if (requested && actual !== requested) throw new Error(`Rebrickable a ouvert l’inventaire ${actual || 'par défaut'} au lieu de ${requested}.`);
     }
     const content = await exportCsv();
+    const metadata = {
+      name: document.querySelector('meta[property="og:title"]')?.content || document.querySelector('h1')?.textContent || document.title,
+      imageUrl: document.querySelector('meta[property="og:image"]')?.content || ''
+    };
     const message = mode === 'set'
       ? { type: 'SAVE_SET_CSV', content, sourceUrl: location.href }
-      : { type: 'SAVE_CSV', content };
+      : mode === 'moc'
+        ? { type: 'SAVE_MODEL_CSV', content, sourceUrl, metadata }
+        : { type: 'SAVE_CSV', content };
     const response = await chrome.runtime.sendMessage(message);
     if (!response?.ok) throw new Error(response?.error || 'Import local impossible.');
     return response;
@@ -104,9 +110,15 @@
     button.textContent = 'Export en cours…';
     button.style.background = '#ffd328';
     try {
-      const mode = location.pathname.startsWith('/sets/') ? 'set' : 'locations';
-      const response = await performSync(mode);
-      button.textContent = mode === 'set' ? `${response.count} références synchronisées ✓` : `${response.count} emplacements synchronisés ✓`;
+      const mode = location.pathname.startsWith('/sets/') ? 'set' : location.pathname.startsWith('/mocs/') ? 'moc' : 'locations';
+      const response = mode === 'locations' && !location.pathname.startsWith('/users/sourivore/partlists/108467')
+        ? await chrome.runtime.sendMessage({ type: 'SYNC_DEFAULT_LOCATIONS' })
+        : await performSync(mode);
+      button.textContent = response.skipped
+        ? 'Liste déjà synchronisée ✓'
+        : mode === 'locations'
+          ? `${response.count} emplacements synchronisés ✓`
+          : `${response.count} références synchronisées ✓`;
       button.style.background = '#91e0b9';
     } catch (error) {
       button.textContent = error.message;
@@ -123,4 +135,8 @@
       .catch(error => respond({ ok: false, error: error.message }));
     return true;
   });
+
+  if (!location.pathname.startsWith('/users/sourivore/partlists/108467')) {
+    chrome.runtime.sendMessage({ type: 'SYNC_DEFAULT_LOCATIONS' }).catch(() => {});
+  }
 })();

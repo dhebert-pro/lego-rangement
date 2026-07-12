@@ -1,11 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
 test('accepte directement un numéro de set', () => assert.equal(cleanSetNumber('75379-1'), '75379-1'));
 test('rejette une valeur invalide', () => assert.throws(() => cleanSetNumber('Apollo'), /invalide/));
+test('reconnaît un lien de MOC avec son slug', () => assert.deepEqual(cleanModel('https://rebrickable.com/mocs/MOC-261470/Wurger%20Bricks/1989-bat-mobile/#details'), { type: 'moc', id: 'MOC-261470' }));
 test('interprète la colonne Color Rebrickable comme un identifiant numérique', () => {
   const [part] = mappingsFromCsv('Part,Color,Quantity,Notes,Location,IsUsed\n3707,0,8,,C2,False\n');
   assert.deepEqual(part, { partNum: '3707', colorId: 0, colorName: '', location: 'C2' });
@@ -17,6 +18,9 @@ test('conserve la version inventory demandée dans le lien', () => {
 test('lit un inventaire de set Rebrickable en excluant les pièces de rechange', () => {
   const parts = setPartsFromCsv('Part,Color,Quantity,Is Spare\n3001,0,4,False\n3002,1,1,True\n');
   assert.deepEqual(parts, [{ partNum: '3001', colorId: 0, quantity: 4, isSpare: false }]);
+});
+test('exclut aussi les spares renvoyés par une API malgré le paramètre inc_spares', () => {
+  assert.deepEqual(withoutSpares([{ id: 1, is_spare: true }, { id: 2, is_spare: false }, { id: 3, isSpare: true }]), [{ id: 2, is_spare: false }]);
 });
 test('calcule les dimensions depuis les sommets LDraw sans utiliser le nom', () => {
   const bounds = combineLDrawBounds('3 16 -20 -12 -10 20 -12 -10 20 12 10\n4 16 -20 -12 -10 20 12 10 -20 12 10 -20 12 -10\n');
@@ -44,6 +48,15 @@ test('classe une grosse pièce mesurée avant une petite pièce sans mesure', ()
   const large = { quantity: 2, color: { rgb: 'FF0000' }, physical: { dimensionsCm: [4, 6, 2], volumeCm3: 48 } };
   const unknown = { quantity: 2, color: { rgb: '808080' } };
   assert.ok(pieceDifficulty(large).score < pieceDifficulty(unknown).score);
+});
+test('privilégie une grosse silhouette unique avant des pièces plates très proches', () => {
+  const rows = [
+    { location: 'A', quantity: 1, part: { part_num: 'window', part_cat_id: 1 }, color: { id: 1, rgb: '808080' }, physical: { dimensionsCm: [1.2, 5, 7], volumeCm3: 42 } },
+    { location: 'B', quantity: 2, part: { part_num: 'plate-a', part_cat_id: 2 }, color: { id: 1, rgb: '808080' }, physical: { dimensionsCm: [.25, 1.6, 2.4], volumeCm3: .96 } },
+    { location: 'C', quantity: 2, part: { part_num: 'plate-b', part_cat_id: 2 }, color: { id: 1, rgb: '808080' }, physical: { dimensionsCm: [.25, 1.6, 2.5], volumeCm3: 1 } }
+  ];
+  const plan = buildStoragePlan(rows);
+  assert.equal(plan.visits[0].location, 'A');
 });
 test('peut rouvrir une case lorsque les groupes physiques sont très éloignés', () => {
   const rows = [

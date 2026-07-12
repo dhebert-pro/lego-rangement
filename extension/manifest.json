@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "LEGO Rangement — Rebrickable Sync",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Synchronise les emplacements d’une part list Rebrickable avec l’application LEGO Rangement locale.",
-  "permissions": ["tabs"],
+  "permissions": ["tabs", "storage"],
   "host_permissions": [
     "https://rebrickable.com/*",
     "http://localhost:3000/*"
@@ -13,7 +13,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://rebrickable.com/users/*/partlists/*", "https://rebrickable.com/sets/*"],
+      "matches": ["https://rebrickable.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     },
