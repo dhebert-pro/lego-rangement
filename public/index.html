@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LEGO Rangement</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/extras.css">
+</head>
+<body>
+  <header><div class="studs"><i></i><i></i><i></i><i></i></div><p class="eyebrow">OUTIL D'ATELIER</p><h1>Chaque pièce.<br><span>La bonne case.</span></h1><p>Collez un set Rebrickable et retrouvez instantanément où sont rangées ses pièces.</p></header>
+  <main>
+    <form id="form">
+      <div class="primary"><label for="setUrl">Lien du modèle</label><div class="input-action"><input id="setUrl" required value="https://rebrickable.com/sets/21309-1/nasa-apollo-saturn-v/#parts"><button>Localiser les pièces <b>→</b></button></div></div>
+      <details open id="connection"><summary>Connexion Rebrickable</summary><div class="settings">
+        <label>Clé API <input id="apiKey" type="password" autocomplete="off" placeholder="Votre clé API"></label>
+        <label>Identifiant <input id="username" autocomplete="username" placeholder="Votre nom d’utilisateur"></label>
+        <label>Mot de passe <input id="password" type="password" autocomplete="current-password" placeholder="Votre mot de passe"></label>
+        <label>ID de la part list <input id="partListId" type="number" value="108467" required></label>
+      </div><div class="login-row"><button type="button" id="login">Se connecter</button><span id="loginStatus">Connexion en cours…</span></div><p class="hint">La connexion enregistrée reste uniquement sur cet ordinateur. Le serveur conserve un jeton Rebrickable, pas votre mot de passe.</p></details>
+      <div class="import-panel"><div><strong>Emplacements des cases</strong><span id="importStatus">Le module Chrome peut exporter directement la liste, ou vous pouvez importer manuellement un CSV Rebrickable.</span></div><div class="import-actions"><a class="secondary-button" href="/extension-guide.html" target="_blank">Module Chrome</a><label class="file-button">Importer un fichier<input id="backupFile" type="file" accept=".zip,.json,.csv,.tsv,.txt,application/zip,application/json,text/csv"></label></div></div>
+    </form>
+    <section id="state" class="empty"><div class="bin-icon">▦</div><h2>Prêt à trier</h2><p>Les résultats seront regroupés par numéro de case.</p></section>
+    <section id="results" hidden><div class="result-head"><div><p class="eyebrow">PLAN DE RANGEMENT</p><h2 id="setName"></h2></div><div id="stats"></div></div><div id="locationNotice" class="notice" hidden></div><div class="filters"><input id="search" placeholder="Rechercher une pièce, une couleur, une case…"><button data-filter="all" class="active">Toutes</button><button data-filter="missing">Sans case</button></div><div id="groups"></div></section>
+  </main>
+  <footer>Données fournies par Rebrickable · LEGO® est une marque du groupe LEGO.</footer>
+  <script src="/app.js"></script>
+</body>
+</html>

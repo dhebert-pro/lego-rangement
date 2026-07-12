@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Installer la synchronisation Rebrickable</title>
+  <style>
+    body{margin:0;background:#f4f0e7;color:#17211d;font:16px/1.55 system-ui,sans-serif}main{max-width:760px;margin:50px auto;padding:34px;background:#fffdf8;border:1px solid #d8d3c7;border-radius:10px}h1{line-height:1.1}li{margin:13px 0}code{display:block;margin:8px 0;padding:13px;background:#17211d;color:#fff;border-radius:5px;overflow:auto}.tip{padding:14px 17px;border-left:5px solid #ffd328;background:#fff7ce}a{color:#0e704b;font-weight:700}
+  </style>
+</head>
+<body><main>
+  <p><a href="/">← Retour à LEGO Rangement</a></p>
+  <h1>Installer la synchronisation des cases</h1>
+  <ol>
+    <li>Dans Chrome, ouvrez <code>chrome://extensions</code></li>
+    <li>Activez <strong>Mode développeur</strong> en haut à droite.</li>
+    <li>Cliquez sur <strong>Charger l’extension non empaquetée</strong>.</li>
+    <li>Sélectionnez ce dossier :<code>C:\Users\proda\OneDrive\Documents\LEGO\extension</code></li>
+    <li>Si le module était déjà installé, cliquez d’abord sur son bouton <strong>Actualiser</strong> dans <code>chrome://extensions</code>.</li>
+    <li>Rechargez LEGO Rangement. Le module ouvrira désormais la part list dans un onglet inactif, réalisera l’export puis fermera cet onglet automatiquement.</li>
+    <li>Pour un set comportant <code>inventory=1</code> ou une autre révision, le même mécanisme exporte automatiquement la version exacte avant la recherche.</li>
+  </ol>
+  <p class="tip">Le module utilise uniquement <strong>Export Parts → Rebrickable CSV</strong> dans des onglets inactifs. Il reproduit le formulaire d’export, sans parcourir les pages de pièces et sans accéder à votre mot de passe.</p>
+</main></body>
+</html>

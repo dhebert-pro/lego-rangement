@@ -1,0 +1,4 @@
+config.local.json
+locations.local.json
+set-inventories.local.json
+*.log
