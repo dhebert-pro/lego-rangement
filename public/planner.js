@@ -21,7 +21,7 @@
       ? Number(part.physical.volumeCm3)
       : complete ? dimensions.reduce((product, value) => product * value, 1) : null;
     return {
-      available: complete || weightG != null,
+      available: complete,
       dimensions,
       weightG,
       volumeCm3,
@@ -39,15 +39,15 @@
     if (physical.available) {
       if (physical.volumeCm3 != null) score -= clamp(Math.log1p(physical.volumeCm3) * 9, 0, 30);
       if (physical.longestCm != null) score -= clamp(Math.log1p(physical.longestCm) * 7, 0, 18);
-      if (physical.weightG != null) score -= clamp(Math.log1p(physical.weightG) * 4, 0, 13);
+      if (physical.weightG != null) score -= clamp(Math.log1p(physical.weightG) * 3, 0, 10);
       if (physical.slenderness >= 5) { score -= 10; reasons.push('forme longue et fine'); }
       else if (physical.flatness != null && physical.flatness <= 0.16) { score -= 7; reasons.push('forme très plate'); }
-      else if ((physical.volumeCm3 || 0) >= 8 || (physical.weightG || 0) >= 5) reasons.push('gros volume');
-      else if ((physical.volumeCm3 || Infinity) < 0.5 && (physical.weightG || Infinity) < 0.7) reasons.push('très petite pièce');
-      else reasons.push('gabarit physique connu');
+      else if ((physical.volumeCm3 || 0) >= 8) reasons.push('gros volume');
+      else if ((physical.volumeCm3 || Infinity) < 0.5) reasons.push('très petite pièce');
+      else reasons.push('gabarit LDraw connu');
     } else {
       score += 10;
-      reasons.push('mesures BrickLink manquantes');
+      reasons.push('géométrie LDraw manquante');
     }
     const color = rgbProfile(part.color?.rgb);
     if (color) {

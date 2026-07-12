@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, physicalFromBrickLink, upsertLocationMapping } = require('../server');
+const { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping } = require('../server');
 const { pieceDifficulty, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -18,10 +18,20 @@ test('lit un inventaire de set Rebrickable en excluant les pièces de rechange',
   const parts = setPartsFromCsv('Part,Color,Quantity,Is Spare\n3001,0,4,False\n3002,1,1,True\n');
   assert.deepEqual(parts, [{ partNum: '3001', colorId: 0, quantity: 4, isSpare: false }]);
 });
-test('normalise le poids et les dimensions BrickLink sans utiliser le nom', () => {
-  assert.deepEqual(physicalFromBrickLink({ no: '3001', name: 'nom volontairement faux', weight: '2.32', dim_x: '1.60', dim_y: '3.20', dim_z: '1.15' }, '3001'), {
-    source: 'BrickLink', bricklinkNo: '3001', weightG: 2.32, dimensionsCm: [1.6, 3.2, 1.15], volumeCm3: 5.888
+test('calcule les dimensions depuis les sommets LDraw sans utiliser le nom', () => {
+  const bounds = combineLDrawBounds('3 16 -20 -12 -10 20 -12 -10 20 12 10\n4 16 -20 -12 -10 20 12 10 -20 12 10 -20 12 -10\n');
+  assert.deepEqual(physicalFromLDrawBounds(bounds, '3001'), {
+    source: 'LDraw', ldrawNo: '3001', dimensionsCm: [1.6, 0.96, 0.8], volumeCm3: 1.229
   });
+});
+test('applique la matrice des sous-pièces LDraw à la boîte englobante', () => {
+  const child = { min: [-1, -2, -3], max: [1, 2, 3] };
+  const bounds = combineLDrawBounds('1 16 10 20 30 1 0 0 0 1 0 0 0 1 child.dat\n', { 'child.dat': child });
+  assert.deepEqual(bounds, { min: [9, 18, 27], max: [11, 22, 33] });
+});
+test('ignore les points de contrôle des lignes conditionnelles LDraw', () => {
+  const bounds = combineLDrawBounds('5 24 -1 -2 -3 1 2 3 -100 -100 -100 100 100 100\n');
+  assert.deepEqual(bounds, { min: [-1, -2, -3], max: [1, 2, 3] });
 });
 test('remplace uniquement la case de la même pièce et couleur', () => {
   const mappings = [{ partNum: '3001', colorId: 0, colorName: '', location: 'A1' }, { partNum: '3001', colorId: 1, colorName: '', location: 'B1' }];
@@ -31,14 +41,14 @@ test('remplace uniquement la case de la même pièce et couleur', () => {
   ]);
 });
 test('classe une grosse pièce mesurée avant une petite pièce sans mesure', () => {
-  const large = { quantity: 2, color: { rgb: 'FF0000' }, physical: { weightG: 12, dimensionsCm: [4, 6, 2], volumeCm3: 48 } };
+  const large = { quantity: 2, color: { rgb: 'FF0000' }, physical: { dimensionsCm: [4, 6, 2], volumeCm3: 48 } };
   const unknown = { quantity: 2, color: { rgb: '808080' } };
   assert.ok(pieceDifficulty(large).score < pieceDifficulty(unknown).score);
 });
 test('peut rouvrir une case lorsque les groupes physiques sont très éloignés', () => {
   const rows = [
-    { location: 'A1', quantity: 10, part: { part_num: 'large' }, color: { id: 1, rgb: 'FF0000' }, physical: { weightG: 25, dimensionsCm: [5, 7, 3], volumeCm3: 105 } },
-    { location: 'A1', quantity: 1, part: { part_num: 'tiny' }, color: { id: 1, rgb: '808080' }, physical: { weightG: 0.05, dimensionsCm: [0.2, 0.2, 0.1], volumeCm3: 0.004 } }
+    { location: 'A1', quantity: 10, part: { part_num: 'large' }, color: { id: 1, rgb: 'FF0000' }, physical: { dimensionsCm: [5, 7, 3], volumeCm3: 105 } },
+    { location: 'A1', quantity: 1, part: { part_num: 'tiny' }, color: { id: 1, rgb: '808080' }, physical: { dimensionsCm: [0.2, 0.2, 0.1], volumeCm3: 0.004 } }
   ];
   const plan = buildStoragePlan(rows);
   assert.equal(plan.visits.length, 2);

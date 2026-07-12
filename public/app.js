@@ -58,11 +58,10 @@ function escapeHtml(value) {
 
 function physicalLabel(part) {
   const physical = part.physical;
-  if (!physical) return 'Mesures physiques indisponibles';
+  if (!physical) return 'Géométrie LDraw indisponible';
   const dimensions = (physical.dimensionsCm || []).map(value => Number(value) || 0);
-  const dimensionText = dimensions.every(Boolean) ? `${dimensions.map(value => value.toFixed(2)).join(' × ')} cm` : 'dimensions manquantes';
-  const weightText = physical.weightG ? `${Number(physical.weightG).toFixed(2)} g` : 'poids manquant';
-  return `${dimensionText} · ${weightText}`;
+  const weight = physical.weightG ? ` · ${Number(physical.weightG).toFixed(2)} g` : '';
+  return dimensions.every(Boolean) ? `${dimensions.map(value => value.toFixed(2)).join(' × ')} cm${weight} · ${physical.source}` : 'Géométrie LDraw incomplète';
 }
 
 function editorHtml(part, alwaysOpen = false) {
@@ -74,7 +73,7 @@ function partHtml(part, missing = false) {
   const sorting = part.sorting || LegoPlanner.pieceDifficulty(part);
   return `<div class="part ${missing ? 'unassigned' : ''}">
     <div class="pic">${part.part?.part_img_url ? `<img src="${escapeHtml(part.part.part_img_url)}" alt="">` : '◫'}</div>
-    <div class="part-info"><b>${escapeHtml(part.part?.name || part.part?.part_num)}</b><span>${escapeHtml(part.color?.name)} · ${escapeHtml(part.part?.part_num)}</span><span class="physical-data">${escapeHtml(physicalLabel(part))}</span><span class="difficulty difficulty-${sorting.level.toLowerCase()}">${sorting.level} · ${escapeHtml(sorting.reasons.join(', '))}</span>${editorHtml(part, missing)}</div>
+    <div class="part-info"><b>${escapeHtml(part.part?.name || part.part?.part_num)}</b><span>${escapeHtml(part.color?.name)} · ${escapeHtml(part.part?.part_num)}${part.bricklinkUrl ? ` · <a href="${escapeHtml(part.bricklinkUrl)}" target="_blank" rel="noreferrer">fiche BrickLink</a>` : ''}</span><span class="physical-data">${escapeHtml(physicalLabel(part))}</span><span class="difficulty difficulty-${sorting.level.toLowerCase()}">${sorting.level} · ${escapeHtml(sorting.reasons.join(', '))}</span>${editorHtml(part, missing)}</div>
     <strong class="qty">× ${part.quantity}</strong>
   </div>`;
 }
@@ -136,7 +135,7 @@ form.addEventListener('submit', async event => {
   results.hidden = true;
   state.hidden = false;
   state.className = 'loading';
-  state.innerHTML = '<div class="spinner"></div><h2>Inventaire en cours…</h2><p>Comparaison du set et récupération des mesures physiques mises en cache.</p>';
+    state.innerHTML = '<div class="spinner"></div><h2>Inventaire en cours…</h2><p>Comparaison du set et calcul des encombrements LDraw mis en cache.</p>';
   try {
     if (!userToken) throw new Error('Connectez-vous d’abord à Rebrickable.');
     let requestedInventory = null;
@@ -157,10 +156,8 @@ form.addEventListener('submit', async event => {
     locationNotice.innerHTML = locationNotice.hidden ? '' : '<strong>Pourquoi aucune case ?</strong> Importez l’export CSV de la part list ou attribuez les cases directement ci-dessous.';
     const physicalNotice = document.querySelector('#physicalNotice');
     const physical = data.physicalData || {};
-    physicalNotice.hidden = physical.configured && physical.available === physical.total && !physical.error;
-    physicalNotice.innerHTML = !physical.configured
-      ? '<strong>Classement physique incomplet.</strong> Configurez BrickLink pour utiliser les poids et dimensions réels. Aucun nom de pièce n’est utilisé pour les estimer.'
-      : `<strong>Couverture BrickLink : ${physical.available}/${physical.total}.</strong> ${physical.error ? escapeHtml(physical.error) : 'Certaines références ne possèdent pas de mesures complètes.'}`;
+    physicalNotice.hidden = physical.available === physical.total && !physical.error;
+    physicalNotice.innerHTML = `<strong>Couverture géométrique : ${physical.available || 0}/${physical.total || rows.length}.</strong> Poids Studio disponibles pour ${physical.weights || 0} références. Certaines références peuvent ne pas posséder de modèle 3D officiel ; aucun nom de pièce n’est utilisé pour estimer leur taille.`;
     state.hidden = true;
     results.hidden = false;
     render();
@@ -201,27 +198,6 @@ document.querySelector('#login').addEventListener('click', async () => {
   status.textContent = 'Identifiants modifiés : reconnectez-vous.';
 }));
 
-document.querySelector('#saveBrickLink').addEventListener('click', async () => {
-  const button = document.querySelector('#saveBrickLink');
-  const status = document.querySelector('#bricklinkStatus');
-  const ids = ['blConsumerKey', 'blConsumerSecret', 'blToken', 'blTokenSecret'];
-  button.disabled = true;
-  status.textContent = 'Enregistrement…';
-  try {
-    const values = Object.fromEntries(ids.map(id => [id, document.querySelector(`#${id}`).value]));
-    const response = await fetch('/api/bricklink/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ consumerKey: values.blConsumerKey, consumerSecret: values.blConsumerSecret, token: values.blToken, tokenSecret: values.blTokenSecret }) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-    ids.forEach(id => { document.querySelector(`#${id}`).value = ''; });
-    status.className = 'connected';
-    status.textContent = 'BrickLink configuré. Relancez la recherche pour charger les mesures.';
-    document.querySelector('#bricklinkConnection').open = false;
-  } catch (error) {
-    status.className = 'failed';
-    status.textContent = error.message;
-  } finally { button.disabled = false; }
-});
-
 async function autoLogin() {
   const status = document.querySelector('#loginStatus');
   try {
@@ -229,11 +205,6 @@ async function autoLogin() {
     const config = await configResponse.json();
     partListId.value = config.partListId || 108467;
     if (config.locationCount) document.querySelector('#importStatus').textContent = `${config.locationCount} emplacements déjà enregistrés.`;
-    if (config.bricklinkConfigured) {
-      document.querySelector('#bricklinkStatus').className = 'connected';
-      document.querySelector('#bricklinkStatus').textContent = 'BrickLink configuré ; les mesures seront mises en cache.';
-      document.querySelector('#bricklinkConnection').open = false;
-    }
     if (!config.configured) { status.textContent = 'Connexion nécessaire avant la recherche.'; return; }
     const response = await fetch('/api/login/saved', { method: 'POST' });
     const data = await response.json();

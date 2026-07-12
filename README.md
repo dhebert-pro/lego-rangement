@@ -22,15 +22,19 @@ Le module Chrome 2.x synchronise automatiquement la part list `108467`. Un lien 
 
 Le nom de la pièce n’est jamais utilisé pour estimer sa forme ou sa taille. Le score repose sur :
 
-- le poids et les trois dimensions du catalogue BrickLink ;
-- la géométrie déduite de ces mesures (volume, allongement, finesse) ;
+- les trois dimensions calculées depuis la géométrie 3D officielle LDraw ;
+- le volume, l’allongement et la finesse déduits de cette géométrie ;
 - la couleur structurée et la quantité dans le set.
 
-Les mesures BrickLink sont récupérées par l’API officielle puis conservées 90 jours dans `bricklink-cache.local.json`. Configurez les quatre identifiants OAuth depuis la section **Données physiques BrickLink** de l’application.
+Rebrickable fournit la correspondance vers LDraw dans `external_ids.LDraw`. Le fichier embarqué `data/ldraw-dimensions.json` contient les boîtes englobantes calculées depuis les sommets et sous-pièces de la bibliothèque officielle LDraw. Il couvre plus de 24 000 références et évite tout appel réseau au lancement.
+
+Si BrickLink Studio a déjà créé son cache catalogue local, l’application y lit également le poids. Ce cache est facultatif : aucun compte vendeur et aucune clé API ne sont nécessaires.
 
 Les pièces faciles à repérer sont proposées en premier. Les références d’une même case restent regroupées, sauf lorsqu’un écart important de difficulté compense le coût d’une seconde ouverture. Dans ce cas, le plan affiche explicitement deux passages.
 
-Les mesures BrickLink sont communautaires et doivent être considérées comme indicatives. Lorsqu’elles manquent, l’application le signale au lieu d’inventer une taille à partir du nom.
+`external_ids.BrickLink` sert à faire correspondre le cache Studio local et à afficher un lien vers la fiche publique BrickLink. Lorsqu’un modèle LDraw manque, l’application le signale au lieu d’inventer une taille à partir du nom.
+
+Le catalogue peut être régénéré avec `node scripts/build-ldraw-dimensions.js data/ldraw-complete.zip data/ldraw-dimensions.json`. La bibliothèque LDraw est distribuée sous licence CC BY 4.0.
 
 ## Tests
 

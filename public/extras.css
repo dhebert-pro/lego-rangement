@@ -36,7 +36,9 @@
 }
 .notice strong { margin-right: 5px; }
 .physical-notice { border-left-color: #3084c6; background: #eaf5ff; }
-.bricklink-settings { grid-template-columns: repeat(4, 1fr); }
+.geometry-source { margin-top: 17px; padding: 12px 15px; border-radius: 6px; background: #eaf5ff; border-left: 4px solid #3084c6; }
+.geometry-source strong, .geometry-source span { display: block; }
+.geometry-source span { color: #51636d; font-size: 13px; }
 .group .case em { margin-top: 10px; padding: 4px 7px; border: 1px solid #ffffff66; border-radius: 4px; font-size: 11px; font-style: normal; font-weight: 800; }
 .planned-group .case small { color: var(--yellow); }
 .split-note { margin: 0 -20px; padding: 9px 20px; background: #fff7ce; color: #665819; font-size: 12px; }
@@ -60,6 +62,5 @@
   .import-panel { align-items: stretch; flex-direction: column; }
   .file-button, .secondary-button { text-align: center; }
   .import-actions { align-items: stretch; flex-direction: column; }
-  .bricklink-settings { grid-template-columns: 1fr; }
   .split-note { margin: 0 -10px; padding-left: 10px; padding-right: 10px; }
 }

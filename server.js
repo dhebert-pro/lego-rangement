@@ -2,14 +2,15 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
-const crypto = require('node:crypto');
+const os = require('node:os');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC = path.join(__dirname, 'public');
 const CONFIG_PATH = path.join(__dirname, 'config.local.json');
 const LOCATIONS_PATH = path.join(__dirname, 'locations.local.json');
 const SET_INVENTORIES_PATH = path.join(__dirname, 'set-inventories.local.json');
-const BRICKLINK_CACHE_PATH = path.join(__dirname, 'bricklink-cache.local.json');
+const LDRAW_DIMENSIONS_PATH = path.join(__dirname, 'data', 'ldraw-dimensions.json');
+const STUDIO_META_PATH = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Stud.io', 'BLBrickMetaInfo') : path.join(os.homedir(), 'AppData', 'Local', 'Stud.io', 'BLBrickMetaInfo');
 
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
@@ -29,16 +30,6 @@ function savedConfig() {
 function saveConfig(rebrickable) {
   const config = readJson(CONFIG_PATH);
   config.rebrickable = rebrickable;
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
-}
-
-function savedBrickLinkConfig() {
-  return readJson(CONFIG_PATH).bricklink || {};
-}
-
-function saveBrickLinkConfig(bricklink) {
-  const config = readJson(CONFIG_PATH);
-  config.bricklink = bricklink;
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }
 
@@ -89,92 +80,130 @@ async function getAll(url, apiKey) {
   return results;
 }
 
-const oauthEncode = value => encodeURIComponent(String(value)).replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+const LDRAW_TO_CM = 0.04;
 
-async function requestBrickLinkItem(partNum, credentials = savedBrickLinkConfig()) {
-  const required = ['consumerKey', 'consumerSecret', 'token', 'tokenSecret'];
-  if (!required.every(key => credentials[key])) throw Object.assign(new Error('Connexion BrickLink non configurée.'), { code: 'BRICKLINK_NOT_CONFIGURED' });
-  const url = `https://api.bricklink.com/api/store/v1/items/PART/${encodeURIComponent(partNum)}`;
-  const oauth = {
-    oauth_consumer_key: credentials.consumerKey,
-    oauth_nonce: crypto.randomBytes(16).toString('hex'),
-    oauth_signature_method: 'HMAC-SHA1',
-    oauth_timestamp: Math.floor(Date.now() / 1000),
-    oauth_token: credentials.token,
-    oauth_version: '1.0'
-  };
-  const parameterString = Object.entries(oauth).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${oauthEncode(key)}=${oauthEncode(value)}`).join('&');
-  const signatureBase = `GET&${oauthEncode(url)}&${oauthEncode(parameterString)}`;
-  oauth.oauth_signature = crypto.createHmac('sha1', `${oauthEncode(credentials.consumerSecret)}&${oauthEncode(credentials.tokenSecret)}`).update(signatureBase).digest('base64');
-  const authorization = `OAuth ${Object.entries(oauth).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${oauthEncode(key)}="${oauthEncode(value)}"`).join(', ')}`;
-  const response = await fetch(url, { headers: { Authorization: authorization } });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.meta?.code >= 400) {
-    const status = body.meta?.code || response.status;
-    throw Object.assign(new Error(body.meta?.message || `Erreur BrickLink (${status})`), { status });
-  }
-  return body.data || {};
-}
-
-function physicalFromBrickLink(item, bricklinkNo) {
-  const number = value => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  };
-  const dimensionsCm = [number(item.dim_x), number(item.dim_y), number(item.dim_z)];
-  const completeDimensions = dimensionsCm.every(value => value != null);
-  return {
-    source: 'BrickLink',
-    bricklinkNo: String(bricklinkNo || item.no || ''),
-    weightG: number(item.weight),
-    dimensionsCm,
-    volumeCm3: completeDimensions ? Number(dimensionsCm.reduce((product, value) => product * value, 1).toFixed(3)) : null
-  };
-}
-
-function brickLinkNumber(part) {
-  const external = part?.part?.external_ids?.BrickLink ?? part?.external_ids?.BrickLink;
+function externalId(part, source) {
+  const external = part?.part?.external_ids?.[source] ?? part?.external_ids?.[source];
   const candidate = Array.isArray(external) ? external[0] : external;
   return candidate == null || String(candidate).trim() === '' ? null : String(candidate).trim();
 }
 
-async function enrichWithBrickLink(parts) {
-  const credentials = savedBrickLinkConfig();
-  if (!['consumerKey', 'consumerSecret', 'token', 'tokenSecret'].every(key => credentials[key])) {
-    return { parts, status: { configured: false, available: 0, total: parts.length } };
+const emptyBounds = () => ({ min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] });
+const validBounds = bounds => bounds.min.every(Number.isFinite) && bounds.max.every(Number.isFinite);
+
+function includePoint(bounds, point) {
+  for (let axis = 0; axis < 3; axis += 1) {
+    bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
+    bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
   }
-  const cache = readJson(BRICKLINK_CACHE_PATH, { items: {} });
-  cache.items ||= {};
-  const unique = [...new Set(parts.map(brickLinkNumber).filter(Boolean))];
-  let cursor = 0;
-  let lastError = '';
-  let authenticationFailed = false;
-  const worker = async () => {
-    while (cursor < unique.length && !authenticationFailed) {
-      const partNum = unique[cursor++];
-      const cached = cache.items[partNum];
-      const cacheDuration = cached?.physical ? 90 * 24 * 60 * 60 * 1000 : 5 * 60 * 1000;
-      const fresh = cached?.fetchedAt && Date.now() - new Date(cached.fetchedAt).getTime() < cacheDuration;
-      if (fresh) continue;
-      try {
-        const item = await requestBrickLinkItem(partNum, credentials);
-        cache.items[partNum] = { fetchedAt: new Date().toISOString(), physical: physicalFromBrickLink(item, partNum) };
-      } catch (error) {
-        lastError = error.message;
-        if ([401, 403].includes(error.status)) authenticationFailed = true;
-        cache.items[partNum] = { fetchedAt: new Date().toISOString(), physical: null, error: error.message };
+}
+
+function transformPoint(point, transform) {
+  const [x, y, z, a, b, c, d, e, f, g, h, i] = transform;
+  return [x + a * point[0] + b * point[1] + c * point[2], y + d * point[0] + e * point[1] + f * point[2], z + g * point[0] + h * point[1] + i * point[2]];
+}
+
+function corners(bounds) {
+  const result = [];
+  for (const x of [bounds.min[0], bounds.max[0]]) for (const y of [bounds.min[1], bounds.max[1]]) for (const z of [bounds.min[2], bounds.max[2]]) result.push([x, y, z]);
+  return result;
+}
+
+function parseLDraw(text) {
+  const points = [];
+  const references = [];
+  String(text).split(/\r?\n/).forEach(line => {
+    const fields = line.trim().split(/\s+/);
+    const type = Number(fields[0]);
+    if (type === 1 && fields.length >= 15) {
+      const transform = fields.slice(2, 14).map(Number);
+      const reference = fields.slice(14).join(' ').replace(/\\/g, '/').toLowerCase();
+      if (transform.every(Number.isFinite) && reference) references.push({ transform, reference });
+    } else if ([2, 3, 4, 5].includes(type)) {
+      const pointCount = type === 2 || type === 5 ? 2 : type;
+      const coordinates = fields.slice(2, 2 + pointCount * 3).map(Number);
+      for (let index = 0; index + 2 < coordinates.length; index += 3) {
+        const point = coordinates.slice(index, index + 3);
+        if (point.every(Number.isFinite)) points.push(point);
       }
     }
+  });
+  return { points, references };
+}
+
+function combineLDrawBounds(text, referencedBounds = {}) {
+  const parsed = parseLDraw(text);
+  const bounds = emptyBounds();
+  parsed.points.forEach(point => includePoint(bounds, point));
+  parsed.references.forEach(({ transform, reference }) => {
+    const child = referencedBounds[reference];
+    if (child && validBounds(child)) corners(child).map(point => transformPoint(point, transform)).forEach(point => includePoint(bounds, point));
+  });
+  return validBounds(bounds) ? bounds : null;
+}
+
+function physicalFromLDrawBounds(bounds, ldrawNo) {
+  if (!bounds || !validBounds(bounds)) return null;
+  const dimensionsCm = bounds.max.map((maximum, axis) => Number(((maximum - bounds.min[axis]) * LDRAW_TO_CM).toFixed(3)));
+  if (!dimensionsCm.every(value => value > 0)) return null;
+  return {
+    source: 'LDraw',
+    ldrawNo: String(ldrawNo || ''),
+    dimensionsCm,
+    volumeCm3: Number(dimensionsCm.reduce((product, value) => product * value, 1).toFixed(3))
   };
-  await Promise.all(Array.from({ length: Math.min(4, unique.length) }, worker));
-  fs.writeFileSync(BRICKLINK_CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, 'utf8');
+}
+
+let ldrawDimensions;
+function dimensionsCatalog() {
+  if (!ldrawDimensions) ldrawDimensions = readJson(LDRAW_DIMENSIONS_PATH, { parts: {} });
+  return ldrawDimensions.parts || {};
+}
+
+function studioMetadata(bricklinkNo) {
+  if (!bricklinkNo || !/^[a-z0-9_.-]+$/i.test(bricklinkNo)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(STUDIO_META_PATH, bricklinkNo), 'utf8').replace(/^\uFEFF/, ''));
+  } catch { return null; }
+}
+
+function enrichWithPhysicalData(parts) {
+  const catalog = dimensionsCatalog();
   const enriched = parts.map(part => {
-    const number = brickLinkNumber(part);
-    return { ...part, physical: number ? cache.items[number]?.physical || null : null, bricklinkNo: number };
+    const ldrawNo = externalId(part, 'LDraw');
+    const bricklinkNo = externalId(part, 'BrickLink');
+    const key = String(ldrawNo || '').toLowerCase().replace(/\.dat$/, '');
+    const studio = studioMetadata(bricklinkNo);
+    const catalogDimensions = catalog[key];
+    const modularDimensions = [Number(studio?.DimX), Number(studio?.DimY), Number(studio?.DimZ)];
+    const studioDimensions = modularDimensions.every(value => Number.isFinite(value) && value > 0)
+      ? [Number((modularDimensions[0] * 0.8).toFixed(3)), Number((modularDimensions[1] * 0.8).toFixed(3)), Number((modularDimensions[2] * 0.96).toFixed(3))]
+      : null;
+    const dimensionsCm = catalogDimensions || studioDimensions;
+    const weightG = Number(studio?.Weight) > 0 ? Number(studio.Weight) : null;
+    const physical = dimensionsCm ? {
+      source: catalogDimensions ? (weightG ? 'LDraw + cache Studio' : 'LDraw') : 'cache Studio',
+      ldrawNo,
+      dimensionsCm,
+      volumeCm3: Number(dimensionsCm.reduce((product, value) => product * value, 1).toFixed(3)),
+      weightG
+    } : null;
+    return {
+      ...part,
+      physical,
+      ldrawNo,
+      bricklinkNo,
+      bricklinkUrl: bricklinkNo ? `https://www.bricklink.com/v2/catalog/catalogitem.page?P=${encodeURIComponent(bricklinkNo)}` : null
+    };
   });
   return {
     parts: enriched,
-    status: { configured: true, available: enriched.filter(part => part.physical?.weightG || part.physical?.dimensionsCm?.some(Boolean)).length, total: enriched.length, error: lastError }
+    status: {
+      source: 'catalogue LDraw embarqué',
+      available: enriched.filter(part => part.physical?.dimensionsCm?.every(Boolean)).length,
+      weights: enriched.filter(part => part.physical?.weightG).length,
+      total: enriched.length
+    }
   };
 }
 
@@ -474,7 +503,7 @@ async function api(req, res) {
         return detail ? { ...detail, quantity: item.quantity, is_spare: false } : { part: { part_num: item.partNum, name: item.partNum }, color: { id: item.colorId, name: `Couleur ${item.colorId}` }, quantity: item.quantity, is_spare: false };
       });
     }
-    const physicalData = await enrichWithBrickLink(setParts);
+    const physicalData = enrichWithPhysicalData(setParts);
     setParts = physicalData.parts;
     const locationImport = readJson(LOCATIONS_PATH);
     const importedMappings = locationImport.mappings || [];
@@ -533,25 +562,11 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, assignLocation(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
-  if (req.method === 'POST' && req.url === '/api/bricklink/config') {
-    try {
-      let raw = ''; for await (const chunk of req) raw += chunk;
-      const input = JSON.parse(raw || '{}');
-      const bricklink = Object.fromEntries(['consumerKey', 'consumerSecret', 'token', 'tokenSecret'].map(key => [key, String(input[key] || '').trim()]));
-      if (Object.values(bricklink).some(value => !value)) throw new Error('Les quatre identifiants API BrickLink sont nécessaires.');
-      saveBrickLinkConfig(bricklink);
-      const cache = readJson(BRICKLINK_CACHE_PATH, { items: {} });
-      cache.items = Object.fromEntries(Object.entries(cache.items || {}).filter(([, item]) => item.physical));
-      fs.writeFileSync(BRICKLINK_CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, 'utf8');
-      return send(res, 200, { configured: true });
-    } catch (error) { return send(res, 400, { error: error.message }); }
-  }
   if (req.method === 'POST' && req.url === '/api/locations') return api(req, res);
   if (req.method === 'GET' && req.url === '/api/config-status') {
     const local = savedConfig();
-    const bricklink = savedBrickLinkConfig();
     const locations = readJson(LOCATIONS_PATH);
-    return send(res, 200, { configured: Boolean(local.apiKey && (local.userToken || local.password)), username: local.username || '', partListId: local.partListId || 108467, locationCount: locations.mappings?.length || 0, bricklinkConfigured: ['consumerKey', 'consumerSecret', 'token', 'tokenSecret'].every(key => bricklink[key]) });
+    return send(res, 200, { configured: Boolean(local.apiKey && (local.userToken || local.password)), username: local.username || '', partListId: local.partListId || 108467, locationCount: locations.mappings?.length || 0 });
   }
   if (req.method !== 'GET') return send(res, 405, { error: 'Méthode non autorisée' });
   const requested = req.url === '/' ? '/index.html' : req.url.split('?')[0];
@@ -561,4 +576,4 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) server.listen(PORT, () => console.log(`LEGO Rangement : http://localhost:${PORT}`));
-module.exports = { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, physicalFromBrickLink, upsertLocationMapping, server };
+module.exports = { cleanSetNumber, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, server };
