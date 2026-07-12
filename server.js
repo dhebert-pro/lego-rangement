@@ -418,26 +418,46 @@ function assignLocation(input) {
   return { mapping: mappings[mappings.length - 1], count: mappings.length };
 }
 
-function updateOverfullCases(input) {
-  const data = readJson(OVERFULL_CASES_PATH, { cases: [] });
-  const location = String(input.location || '').trim();
-  if (!location || location.length > 80) throw new Error('Indiquez une case valide.');
-  const sameLocation = item => String(item.location || '').toLocaleLowerCase('fr') === location.toLocaleLowerCase('fr');
-  if (input.action === 'remove') {
-    data.cases = (data.cases || []).filter(item => !sameLocation(item));
-  } else {
-    const existing = (data.cases || []).find(sameLocation);
-    const item = {
-      location,
-      note: String(input.note || '').trim().slice(0, 300),
-      createdAt: existing?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    data.cases = [...(data.cases || []).filter(entry => !sameLocation(entry)), item];
+function storageCases(mappings, selectedLocations = []) {
+  const selected = new Set(selectedLocations.map(value => String(value || '').trim().toLocaleLowerCase('fr')));
+  const byLocation = new Map();
+  for (const mapping of mappings || []) {
+    const location = String(mapping.location || '').trim();
+    const partNum = String(mapping.partNum || '').trim();
+    if (!location || !partNum || /^sans case$/i.test(location)) continue;
+    const key = location.toLocaleLowerCase('fr');
+    if (!byLocation.has(key)) byLocation.set(key, { location, references: new Set(), parts: new Set(), colors: new Set() });
+    const item = byLocation.get(key);
+    const color = mapping.colorId == null ? `name:${String(mapping.colorName || '').trim().toLocaleLowerCase('fr')}` : `id:${mapping.colorId}`;
+    item.references.add(`${partNum}|${color}`);
+    item.parts.add(partNum);
+    item.colors.add(color);
   }
-  data.cases.sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
-  fs.writeFileSync(OVERFULL_CASES_PATH, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  return data;
+  return [...byLocation.entries()].map(([key, item]) => ({
+    location: item.location,
+    referenceCount: item.references.size,
+    partCount: item.parts.size,
+    colorCount: item.colors.size,
+    overfull: selected.has(key)
+  })).sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
+}
+
+function overfullCasesState() {
+  const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+  const saved = readJson(OVERFULL_CASES_PATH, { cases: [] }).cases || [];
+  const cases = storageCases(mappings, saved.map(item => item.location));
+  return { cases, selectedCount: cases.filter(item => item.overfull).length };
+}
+
+function updateOverfullCases(input) {
+  if (!Array.isArray(input.locations)) throw new Error('Liste de cases invalide.');
+  const available = storageCases(readJson(LOCATIONS_PATH, { mappings: [] }).mappings || []);
+  const byKey = new Map(available.map(item => [item.location.toLocaleLowerCase('fr'), item.location]));
+  const locations = [...new Set(input.locations.map(value => String(value || '').trim().toLocaleLowerCase('fr')))]
+    .map(key => byKey.get(key)).filter(Boolean);
+  const now = new Date().toISOString();
+  fs.writeFileSync(OVERFULL_CASES_PATH, `${JSON.stringify({ cases: locations.map(location => ({ location, updatedAt: now })) }, null, 2)}\n`, 'utf8');
+  return overfullCasesState();
 }
 
 function progressSetKey(setNum, inventory) {
@@ -704,7 +724,7 @@ const server = http.createServer(async (req, res) => {
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
   if (req.method === 'GET' && req.url === '/api/overfull-cases') {
-    return send(res, 200, readJson(OVERFULL_CASES_PATH, { cases: [] }));
+    return send(res, 200, overfullCasesState());
   }
   if (req.method === 'POST' && req.url === '/api/overfull-cases') {
     try {
@@ -738,4 +758,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, storageCases, completedWithChange, networkUrls, server };

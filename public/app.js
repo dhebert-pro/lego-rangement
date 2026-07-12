@@ -445,8 +445,19 @@ async function loadNetworkInfo() {
 
 function renderOverfullCases(cases) {
   const list = document.querySelector('#overfullList');
-  document.querySelector('#overfullCount').textContent = cases.length;
-  list.innerHTML = cases.length ? cases.map(item => `<div class="overfull-item"><div><strong>${escapeHtml(item.location)}</strong>${item.note ? `<span>${escapeHtml(item.note)}</span>` : '<span>Aucune remarque</span>'}</div><button type="button" data-remove-overfull="${escapeHtml(item.location)}" aria-label="Retirer la case ${escapeHtml(item.location)}">Retirer</button></div>`).join('') : '<p class="no-overfull">Aucune case signalée.</p>';
+  document.querySelector('#overfullCount').textContent = cases.filter(item => item.overfull).length;
+  list.innerHTML = cases.length ? `<p class="overfull-total">${cases.length} cases utilisées</p>${cases.map(item => `<label class="overfull-option" data-search="${escapeHtml(item.location.toLocaleLowerCase('fr'))}"><input type="checkbox" value="${escapeHtml(item.location)}" ${item.overfull ? 'checked' : ''}><span><strong>${escapeHtml(item.location)}</strong><small>${item.referenceCount} référence${item.referenceCount > 1 ? 's' : ''} · ${item.partCount} type${item.partCount > 1 ? 's' : ''} · ${item.colorCount} couleur${item.colorCount > 1 ? 's' : ''}</small></span></label>`).join('')}` : '<p class="no-overfull">Aucune case occupée n’a été trouvée. Synchronisez d’abord votre liste Rebrickable.</p>';
+  filterOverfullCases(document.querySelector('#overfullSearch').value);
+}
+
+function filterOverfullCases(value) {
+  const query = String(value || '').trim().toLocaleLowerCase('fr');
+  document.querySelectorAll('.overfull-option').forEach(option => { option.hidden = !option.dataset.search.includes(query); });
+}
+
+function updateOverfullCount() {
+  document.querySelector('#overfullCount').textContent = document.querySelectorAll('#overfullList input:checked').length;
+  document.querySelector('#overfullAdvice').hidden = true;
 }
 
 async function loadOverfullCases() {
@@ -462,33 +473,30 @@ async function loadOverfullCases() {
 
 document.querySelector('#overfullForm').addEventListener('submit', async event => {
   event.preventDefault();
-  const form = event.currentTarget;
-  const location = document.querySelector('#overfullLocation').value.trim();
-  const note = document.querySelector('#overfullNote').value.trim();
+  const locations = [...document.querySelectorAll('#overfullList input:checked')].map(input => input.value);
   const status = document.querySelector('#overfullStatus');
   status.textContent = 'Enregistrement…';
   try {
-    const response = await fetch('/api/overfull-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ location, note }) });
+    const response = await fetch('/api/overfull-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ locations }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
     renderOverfullCases(data.cases || []);
-    form.reset();
-    status.textContent = `Case ${location} ajoutée.`;
+    const plural = data.selectedCount === 1 ? '' : 's';
+    status.textContent = `${data.selectedCount} case${plural} trop pleine${plural} enregistrée${plural}.`;
+    document.querySelector('#overfullAdvice').hidden = false;
   } catch (error) { status.textContent = error.message; }
 });
 
-document.querySelector('#overfullList').addEventListener('click', async event => {
-  const button = event.target.closest('[data-remove-overfull]');
-  if (!button) return;
-  const location = button.dataset.removeOverfull;
-  const status = document.querySelector('#overfullStatus');
-  try {
-    const response = await fetch('/api/overfull-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'remove', location }) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-    renderOverfullCases(data.cases || []);
-    status.textContent = `Case ${location} retirée de la liste.`;
-  } catch (error) { status.textContent = error.message; }
+document.querySelector('#overfullList').addEventListener('change', updateOverfullCount);
+
+document.querySelector('#overfullSearch').addEventListener('input', event => {
+  filterOverfullCases(event.currentTarget.value);
+});
+
+document.querySelector('#clearOverfull').addEventListener('click', () => {
+  document.querySelectorAll('#overfullList input:checked').forEach(input => { input.checked = false; });
+  updateOverfullCount();
+  document.querySelector('#overfullStatus').textContent = 'Sélection effacée. Cliquez sur « Valider » pour enregistrer.';
 });
 
 document.querySelector('#copyNetworkUrl').addEventListener('click', async event => {

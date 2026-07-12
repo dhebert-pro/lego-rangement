@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, storageCases, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -10,6 +10,19 @@ test('reconnaît un lien de MOC avec son slug', () => assert.deepEqual(cleanMode
 test('interprète la colonne Color Rebrickable comme un identifiant numérique', () => {
   const [part] = mappingsFromCsv('Part,Color,Quantity,Notes,Location,IsUsed\n3707,0,8,,C2,False\n');
   assert.deepEqual(part, { partNum: '3707', colorId: 0, colorName: '', location: 'C2' });
+});
+test('regroupe toutes les références par case occupée', () => {
+  const cases = storageCases([
+    { partNum: '3001', colorId: 1, location: 'C2' },
+    { partNum: '3001', colorId: 2, location: 'C2' },
+    { partNum: '3002', colorId: 1, location: 'C2' },
+    { partNum: '3003', colorId: 1, location: 'Sans case' },
+    { partNum: '3004', colorId: 1, location: 'A10' }
+  ], ['c2']);
+  assert.deepEqual(cases, [
+    { location: 'A10', referenceCount: 1, partCount: 1, colorCount: 1, overfull: false },
+    { location: 'C2', referenceCount: 3, partCount: 2, colorCount: 2, overfull: true }
+  ]);
 });
 test('conserve la version inventory demandée dans le lien', () => {
   assert.equal(inventoryFromUrl('https://rebrickable.com/sets/21309-1/name/?_=123&inventory=1#parts'), 1);

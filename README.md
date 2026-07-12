@@ -22,7 +22,9 @@ Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu�
 
 ## Cases trop pleines
 
-Le panneau **Cases trop pleines** permet d’enregistrer un numéro de case et une remarque facultative depuis le PC ou le téléphone. Cette liste est partagée dans `overfull-cases.local.json` et exclue de Git. Pour le moment elle sert uniquement de registre : aucun déplacement, découpage ou regroupement de cases n’est effectué automatiquement.
+Le panneau **Cases trop pleines** affiche toutes les cases occupées trouvées dans la liste Rebrickable. Il permet de rechercher, cocher puis valider les cases à réorganiser depuis le PC ou le téléphone. La sélection est partagée dans `overfull-cases.local.json` et exclue de Git. Pour le moment elle sert uniquement de registre : les dimensions des cases et les emplacements vides devront être renseignés avant de proposer un déplacement, une séparation cohérente ou un regroupement.
+
+La future analyse devra préserver des groupes de pièces faciles à comprendre et séparer autant que possible les couleurs visuellement proches, sauf lorsque cette séparation casserait une cohérence de forme ou de catégorie plus importante.
 
 ## Ordre de rangement
 
