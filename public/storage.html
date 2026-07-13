@@ -12,7 +12,8 @@
   <header class="storage-hero"><a class="page-switch" href="/">Ranger un modèle</a><img class="hero-brick" src="/brick.svg" alt="Brique de construction rouge en perspective"><div class="studs"><i></i><i></i><i></i><i></i></div><p class="eyebrow">GESTION DU STOCK</p><h1>Réorganiser<br><span>mes cases.</span></h1><p>Consultez le contenu d’une case, déplacez plusieurs références et gardez la trace de chaque changement.</p></header>
   <main class="storage-main">
     <section class="storage-card lookup-card">
-      <div class="section-title"><div><p class="eyebrow">CONTENU</p><h2>Afficher une case</h2></div><div class="storage-heading-tools"><span id="occupiedCount"></span><button id="exportRebrickable" type="button" class="secondary-button">Exporter pour Rebrickable</button><button id="resyncLocations" type="button" class="secondary-button" disabled>Resynchroniser</button></div></div>
+      <div class="section-title"><div><p class="eyebrow">CONTENU</p><h2>Afficher une case</h2></div><div class="storage-heading-tools"><span id="occupiedCount"></span><button id="downloadBackup" type="button" class="secondary-button">Sauvegarder</button><button id="restoreBackup" type="button" class="secondary-button">Restaurer</button><button id="resyncLocations" type="button" class="secondary-button" disabled>Actualiser depuis Rebrickable</button><input id="backupFile" type="file" accept="application/json,.json" hidden></div></div>
+      <div class="storage-source-note"><strong>Les cases sont gérées par LEGO Rangement</strong><span>Rebrickable fournit la liste des pièces. Vos déplacements restent ici et sont réappliqués après chaque actualisation.</span></div>
       <form id="caseForm" class="storage-form"><label for="caseLocation">Numéro de case</label><div><input id="caseLocation" list="occupiedCases" required placeholder="Ex. C2" autocomplete="off"><button>Afficher les pièces</button></div></form>
       <datalist id="occupiedCases"></datalist>
       <datalist id="allCases"></datalist>
@@ -30,19 +31,6 @@
       <section id="splitAdvice" class="split-advice" aria-live="polite"></section>
       <form id="moveForm" class="move-bar" hidden><div><strong>Déplacer la sélection</strong><span id="moveSummary"></span></div><label for="targetLocation">Nouvelle case</label><input id="targetLocation" list="allCases" required placeholder="Ex. D4" autocomplete="off"><button>Changer la case</button></form>
     </section>
-
-    <details class="storage-card collapsible-card verification-card">
-      <summary><div><p class="eyebrow">CONTRÔLE</p><h2>Vérifier un import Rebrickable</h2></div><span id="verificationBadge">108467 → ?</span></summary>
-      <div class="collapsible-card-content">
-        <p class="section-help">Indiquez l’ID de la nouvelle liste créée après l’import. La liste 108467 sert de référence ; seules les cases prévues par l’application ont le droit de changer.</p>
-        <form id="verifyImportForm" class="verification-form">
-          <label for="importedListId">ID de la liste importée</label>
-          <div><input id="importedListId" inputmode="numeric" pattern="[0-9]+" required placeholder="Ex. 123456" autocomplete="off"><button id="verifyImportButton" type="submit" disabled>Comparer les deux listes</button></div>
-        </form>
-        <p id="verificationStatus" class="storage-status" aria-live="polite">La vérification se fait depuis Chrome avec le module LEGO Rangement.</p>
-        <div id="verificationReport" class="verification-report"></div>
-      </div>
-    </details>
 
     <details class="storage-card collapsible-card empty-card">
       <summary><div><p class="eyebrow">DISPONIBILITÉ</p><h2>Cases vides</h2></div><span id="emptyCount">0</span></summary>

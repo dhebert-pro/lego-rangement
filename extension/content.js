@@ -105,7 +105,6 @@
       await new Promise(resolve => setTimeout(resolve, 1200));
     }
     const content = await exportCsv();
-    if (mode === 'verification') return { content, count: Math.max(0, content.split(/\r?\n/).filter(Boolean).length - 1) };
     const metadata = {
       name: document.querySelector('meta[property="og:title"]')?.content || document.querySelector('h1')?.textContent || document.title,
       imageUrl: document.querySelector('meta[property="og:image"]')?.content || ''
@@ -149,11 +148,9 @@
     return true;
   });
 
-  if (!new URLSearchParams(location.search).has('lego_rangement_verification')) {
-    if (location.pathname.startsWith('/users/sourivore/partlists/108467')) {
-      if (document.visibilityState === 'visible') performSync('locations').catch(() => {});
-    } else {
-      chrome.runtime.sendMessage({ type: 'SYNC_DEFAULT_LOCATIONS' }).catch(() => {});
-    }
+  if (location.pathname.startsWith('/users/sourivore/partlists/108467')) {
+    if (document.visibilityState === 'visible') performSync('locations').catch(() => {});
+  } else {
+    chrome.runtime.sendMessage({ type: 'SYNC_DEFAULT_LOCATIONS' }).catch(() => {});
   }
 })();

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, rebrickableCsvWithLocations, verifyRebrickableImport, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, storageBackupPayload, validateStorageBackup, splitCaseAdvice, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -11,42 +11,32 @@ test('interprète la colonne Color Rebrickable comme un identifiant numérique',
   const [part] = mappingsFromCsv('Part,Color,Quantity,Notes,Location,IsUsed\n3707,0,8,,C2,False\n');
   assert.deepEqual(part, { partNum: '3707', colorId: 0, colorName: '', quantity: 8, location: 'C2' });
 });
-test('prépare un CSV Rebrickable complet en ne modifiant que les emplacements', () => {
-  const source = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,"note, conservée",A1,False,False\n3002,1,7,,B1,True,False\n3003,2,3,,,False,False\n';
-  const result = rebrickableCsvWithLocations(source, [
-    { partNum: '3001', colorId: 4, location: 'C2' },
-    { partNum: '3002', colorId: 1, location: 'B1' }
-  ]);
-  assert.equal(result.rowCount, 3);
-  assert.equal(result.matchedLocations, 2);
-  assert.equal(result.changedLocations, 1);
-  assert.match(result.content, /3001,4,12,"note, conservée",C2,False,False/);
-  assert.match(result.content, /3002,1,7,,B1,True,False/);
-  assert.match(result.content, /3003,2,3,,,False,False/);
+test('sauvegarde les cases, l’historique et les attributions sans identifiants', () => {
+  const backup = storageBackupPayload({
+    locations: { importedAt: '2026-07-01T10:00:00.000Z', mappings: [{ partNum: '3001', colorId: 4, colorName: 'Red', quantity: 12, location: 'C2' }] },
+    history: { moves: [{ partNum: '3001', colorId: 4, colorName: 'Red', quantity: 12, originalLocation: 'A1', currentLocation: 'C2' }] },
+    overrides: { mappings: [{ partNum: '3001', colorId: 4, location: 'C2', source: 'history' }] }
+  });
+  assert.equal(backup.format, 'lego-rangement-storage-backup');
+  assert.equal(backup.locations.mappings[0].location, 'C2');
+  assert.deepEqual(backup.history.moves.map(move => [move.originalLocation, move.currentLocation]), [['A1', 'C2']]);
+  assert.equal(JSON.stringify(backup).includes('password'), false);
+  assert.equal(JSON.stringify(backup).includes('apiKey'), false);
 });
-test('valide un import qui ne change que les emplacements attendus', () => {
-  const base = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,note,A1,False,False\n3002,1,7,,B1,True,False\n3003,2,3,,,False,False\n';
-  const imported = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,note,C2,False,False\n3002,1,7,,D4,True,False\n3003,2,3,,,False,False\n';
-  const report = verifyRebrickableImport(base, imported, [
-    { partNum: '3001', colorId: 4, location: 'C2' },
-    { partNum: '3002', colorId: 1, location: 'D4' }
-  ]);
-  assert.equal(report.safe, true);
-  assert.equal(report.expectedLocationChanges, 2);
-  assert.equal(report.verifiedLocationChanges, 2);
-  assert.deepEqual(report.issueCounts, { schema: 0, missing: 0, extra: 0, fieldChanges: 0, wrongLocations: 0 });
+test('restaure la case finale de l’historique même si le fichier est incohérent', () => {
+  const restored = validateStorageBackup({
+    format: 'lego-rangement-storage-backup', version: 1,
+    locations: { mappings: [{ partNum: '3001', colorId: 4, quantity: null, location: 'A1' }] },
+    history: { moves: [{ partNum: '3001', colorId: 4, originalLocation: 'A1', currentLocation: 'C2' }] },
+    overrides: { mappings: [] }
+  });
+  assert.equal(restored.locations.mappings[0].location, 'C2');
+  assert.equal(restored.locations.mappings[0].quantity, null);
+  assert.deepEqual(restored.history.moves.map(move => [move.originalLocation, move.currentLocation]), [['A1', 'C2']]);
+  assert.deepEqual(restored.overrides.mappings.map(item => [item.location, item.source]), [['C2', 'history']]);
 });
-test('signale séparément chaque anomalie d’un import Rebrickable', () => {
-  const base = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,note,A1,False,False\n3002,1,7,,B1,True,False\n3003,2,3,,C1,False,False\n';
-  const imported = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,13,note,C2,False,False\n3002,1,7,,Z9,True,False\n3004,2,3,,C1,False,False\n';
-  const report = verifyRebrickableImport(base, imported, [
-    { partNum: '3001', colorId: 4, location: 'C2' },
-    { partNum: '3002', colorId: 1, location: 'D4' }
-  ]);
-  assert.equal(report.safe, false);
-  assert.deepEqual(report.issueCounts, { schema: 0, missing: 1, extra: 1, fieldChanges: 1, wrongLocations: 1 });
-  assert.equal(report.issues.fieldChanges[0].fields[0].field, 'Quantity');
-  assert.deepEqual(report.issues.wrongLocations[0], { partNum: '3002', color: '1', before: 'B1', expected: 'D4', actual: 'Z9' });
+test('rejette un ancien JSON qui n’est pas une sauvegarde complète', () => {
+  assert.throws(() => validateStorageBackup({ mappings: [] }), /sauvegarde LEGO Rangement compatible/);
 });
 test('regroupe toutes les références par case occupée', () => {
   const cases = occupiedCases([

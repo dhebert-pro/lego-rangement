@@ -12,13 +12,13 @@ La connexion Rebrickable enregistrée dans `config.local.json` est utilisée aut
 
 ## Emplacements
 
-L’API v3 de Rebrickable ne renvoie pas le champ `Location` affiché sur le site. L’application importe donc l’export CSV de la part list, manuellement ou avec le module Chrome dans `extension/`. Les correspondances sont enregistrées dans `locations.local.json`.
+L’API v3 de Rebrickable ne renvoie pas le champ `Location` affiché sur le site. Le module Chrome dans `extension/` lit donc l’export CSV de la part list, puis l’application conserve ses propres cases dans `locations.local.json`. Rebrickable reste la source de la liste des pièces, mais l’application est la source de vérité pour les déplacements effectués ensuite.
 
 Une pièce sans emplacement peut recevoir une case directement dans le résultat. Une pièce déjà localisée propose aussi **Changer de case**. Chaque modification est sauvegardée et recalcule immédiatement le plan.
 
 Chaque pièce ou étape entière peut être cochée comme rangée. **Tout décocher** remet le modèle à zéro. La progression est pondérée par la quantité réelle et sauvegardée dans `progress.local.json`, afin d’être partagée entre le PC et le téléphone. Les cases terminées quittent le plan actif mais restent accessibles dans **Rangées** pour corriger une erreur.
 
-Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant lors de son premier chargement et le conserve dans `set-inventories.local.json`. Il n’est pas nécessaire de relancer l’extension entre deux recherches ; son bouton **Actualiser** ne sert qu’après une mise à jour de son code.
+Le module Chrome 3.5 synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant lors de son premier chargement et le conserve dans `set-inventories.local.json`. Il n’est pas nécessaire de relancer l’extension entre deux recherches ; son bouton **Actualiser** ne sert qu’après une mise à jour de son code.
 
 ## Gestion des cases
 
@@ -26,11 +26,11 @@ La page **Gérer les cases** (`/storage.html`) affiche toutes les références p
 
 Les déplacements sont enregistrés sur le serveur du PC et sont donc partagés avec le téléphone. Une pièce déplacée plusieurs fois ne conserve qu’un trajet entre sa case d’origine et sa case actuelle. Le bouton **Vider l’historique** restaure toutes ces pièces dans leur case d’origine avant d’effacer le journal.
 
-Le bouton **Resynchroniser** de la page de gestion relance un export propre de la part list depuis Chrome. Le CSV redevient la source des emplacements, puis seuls les changements encore présents dans l’historique et les attributions manuelles explicites sont réappliqués. Une ancienne priorité locale sans historique ne peut donc plus écraser silencieusement Rebrickable.
+Le bouton **Actualiser depuis Rebrickable** relit la part list depuis Chrome. Les déplacements encore présents dans l’historique et les attributions manuelles sont ensuite réappliqués automatiquement : cette opération actualise les pièces sans effacer l’organisation faite dans l’application.
 
-Le bouton **Exporter pour Rebrickable** produit ensuite un CSV complet prêt à être réimporté avec **Import/Delete Parts**. Il conserve toutes les lignes, les quantités, notes et états du dernier export synchronisé, et remplace uniquement la colonne `Location` par les emplacements actuels. Une resynchronisation est nécessaire une seule fois après l’ajout de cette fonction afin d’enregistrer le fichier source complet.
+Les boutons **Sauvegarder** et **Restaurer** utilisent un fichier JSON propre à LEGO Rangement. Il contient les emplacements courants, les cases d’origine et finales de l’historique ainsi que les attributions manuelles. Il ne contient ni clé API, ni jeton, ni mot de passe. Avant chaque restauration, le serveur conserve aussi automatiquement l’état précédent dans `storage-before-restore.local.json`.
 
-Le panneau **Vérifier un import Rebrickable** demande l’ID de la nouvelle part list. Le module Chrome télécharge en lecture seule les CSV de la liste de référence `108467` et de la liste importée, puis l’application vérifie les pièces, couleurs, quantités, notes, états et cases. Un import est déclaré conforme uniquement si aucun champ autre que `Location` n’a changé et si chaque nouvelle case correspond exactement à l’état courant de l’application. Les écarts sont classés en pièces manquantes, pièces ajoutées, champs modifiés et cases incorrectes.
+Il n’existe plus de parcours d’export puis de réimport vers Rebrickable : l’import Rebrickable peut normaliser certaines variantes de moules et fusionner des références. Les modifications de `Location` sont donc volontairement gérées uniquement par l’application.
 
 Les cases libres sont calculées dans le référentiel fixe des rangements existants : `1` à `3`, puis `A1` à `A9` jusqu’à `AB1` à `AB9`. Elles sont recalculées après chaque déplacement ou restauration. Les images exactes de chaque couleur sont chargées progressivement puis mises en cache localement.
 
