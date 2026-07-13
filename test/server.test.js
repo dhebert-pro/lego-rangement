@@ -94,6 +94,25 @@ test('peut nommer les groupes par leur gabarit plutôt que par leur quantité', 
   assert.deepEqual(advice.groups.map(group => group.label), ['Gabarit jusqu’à 2×2', 'Gabarit supérieur à 2×2']);
   assert.deepEqual(advice.groups.map(group => group.quantity), [70, 3]);
 });
+test('conserve ensemble les variantes d’un même objet malgré leurs modificateurs', () => {
+  const items = [
+    { partNum: '3822', name: 'Door 1 x 3 x 1 Left', colorName: 'Black', quantity: 3 },
+    { partNum: '3821', name: 'Door 1 x 3 x 1 Right', colorName: 'White', quantity: 2 },
+    { partNum: '92262', name: 'Door 1 x 3 x 2 Left - Open Between Top and Bottom Hinge', colorName: 'Black', quantity: 1 },
+    { partNum: '58381', name: 'Door 1 x 3 x 4 Left - Open Between Top and Bottom Hinge', colorName: 'White', quantity: 1 },
+    { partNum: '58380', name: 'Door 1 x 3 x 4 Right - Open Between Top and Bottom Hinge', colorName: 'White', quantity: 2 },
+    { partNum: '4083', name: 'Bar 1 x 4 x 2 with Studs', colorName: 'Black', quantity: 4 },
+    { partNum: '47458', name: 'Brick Wedged, Curved 1 x 2 x 2/3 No Studs, Wing End', colorName: 'Red', quantity: 12 },
+    { partNum: '2741', name: 'Technic Steering Wheel Large', colorName: 'Black', quantity: 1 },
+    { partNum: '4491b', name: 'Animal / Creature Accessory, Saddle [Two Clips]', colorName: 'Dark Bluish Gray', quantity: 2 }
+  ];
+  for (const count of [2, 3]) {
+    const advice = splitCaseAdvice(items, count, 'I3', ['I4', 'I5']);
+    const doorGroups = ['3822', '3821', '92262', '58381', '58380'].map(partNum => advice.groups.findIndex(group => group.items.some(item => item.partNum === partNum)));
+    assert.equal(new Set(doorGroups).size, 1, `les portes ont été séparées dans le conseil en ${count}`);
+    assert.match(advice.groups[doorGroups[0]].label, /porte|construction/i);
+  }
+});
 test('conserve uniquement le trajet entre la première et la dernière case', () => {
   const first = consolidateMoveHistory([], [{ partNum: '3001', colorId: 1, fromLocation: 'A1', toLocation: 'B1' }]);
   const second = consolidateMoveHistory(first, [{ partNum: '3001', colorId: 1, fromLocation: 'B1', toLocation: 'C1' }]);

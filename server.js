@@ -543,6 +543,22 @@ function splitShapeKey(partNum) {
 
 function splitFamily(name) {
   const value = normalizeSplitText(name);
+  const primaryRules = [
+    [/^animal\b|^creature\b/, ['animal', 'Parties d’animaux et créatures', 'personnages']],
+    [/^minifig\b/, ['figure', 'Éléments de figurines', 'personnages']],
+    [/^door\b/, ['door', 'Portes et trappes', 'construction']],
+    [/^turntable\b/, ['turntable', 'Plateaux tournants et leurs éléments', 'mécanique']],
+    [/^launcher\b/, ['launcher', 'Lanceurs et mécanismes de tir', 'mécanique']],
+    [/^pullback motor\b|^motor\b/, ['motor', 'Moteurs et mécanismes', 'mécanique']],
+    [/^lever\b/, ['control', 'Leviers et commandes', 'mécanique']],
+    [/^wheel\b|^tire\b|^tyre\b/, ['wheel', 'Roues et éléments roulants', 'mécanique']],
+    [/^technic\b/, ['technic', 'Pièces LEGO Technic', 'mécanique']],
+    [/^bar\b/, ['grip', 'Barres et éléments de prise', 'mécanique']],
+    [/^bracket\b/, ['bracket', 'Équerres et supports', 'construction']],
+    [/^brick\b/, ['brick', 'Briques et briques profilées', 'construction']],
+    [/^plate\b/, ['plate', 'Plaques et plaques spéciales', 'construction']],
+    [/^tile\b/, ['tile', 'Tuiles et surfaces lisses', 'construction']]
+  ];
   const rules = [
     [/animal|bird|dragon|dinosaur|tail\b|wing\b|horn\b|claw|paw|hoof|beak|droid|skeleton|minifig|torso|head\b|arm\b|leg\b/, ['figure', 'Parties d’animaux, de droïdes ou de figurines', 'personnages']],
     [/technic|axle|pin\b|liftarm|gear|rack|connector|bionicle/, ['technic', 'Pièces LEGO Technic', 'mécanique']],
@@ -555,10 +571,16 @@ function splitFamily(name) {
     [/cone|cylinder|dish|round|ball|sphere/, ['round', 'Pièces rondes et cylindriques', 'construction']],
     [/plant|flower|leaf|food|weapon|sword|gun\b|shield|window|door|panel|fence/, ['decor', 'Décor et accessoires', 'personnages']]
   ];
-  const match = rules.find(([pattern]) => pattern.test(value));
-  const [key, label, domain] = match?.[1] || ['special', 'Formes spéciales', 'spécial'];
+  const match = primaryRules.find(([pattern]) => pattern.test(value)) || rules.find(([pattern]) => pattern.test(value));
+  const [key, label, domain] = match?.[1] || ['special', 'Formes spéciales', 'construction'];
   return { key, label, domain };
 }
+
+const splitDomainLabels = {
+  mécanique: 'Technic, mécanismes, commandes et éléments mobiles',
+  construction: 'Briques, plaques, portes et autres éléments de construction',
+  personnages: 'Personnages, animaux et accessoires'
+};
 
 function splitFeatures(name) {
   const value = normalizeSplitText(name);
@@ -692,6 +714,7 @@ function splitFamilyCandidate(items, count) {
   }
   const entries = [...byFamily.values()];
   if (entries.length < count) return null;
+  if (entries.length > 9) return null;
   let best = null;
   const assignments = Array(entries.length).fill(0);
   function visit(index) {
@@ -714,6 +737,30 @@ function splitFamilyCandidate(items, count) {
   assignments[0] = 0;
   visit(1);
   return best;
+}
+
+function splitDomainCandidate(items, count) {
+  const byDomain = new Map();
+  for (const item of items) {
+    if (!byDomain.has(item._family.domain)) byDomain.set(item._family.domain, []);
+    byDomain.get(item._family.domain).push(item);
+  }
+  const entries = [...byDomain.entries()].map(([domain, domainItems]) => ({ domain, label: splitDomainLabels[domain] || domain, items: domainItems }));
+  if (entries.length < count) return null;
+  if (entries.length === count) {
+    return splitCandidate('domain', 'grandes familles d’utilisation', entries, 100, 99);
+  }
+  if (count === 2 && entries.length === 3) {
+    const candidates = entries.map((single, index) => {
+      const combined = entries.filter((entry, entryIndex) => entryIndex !== index);
+      return splitCandidate('domain', 'grandes familles d’utilisation', [
+        single,
+        { label: combined.map(entry => entry.label).join(' + '), items: combined.flatMap(entry => entry.items) }
+      ], 94, 96);
+    });
+    return candidates.sort(compareSplitCandidates)[0];
+  }
+  return null;
 }
 
 function splitFallbackCandidate(items, count) {
@@ -753,6 +800,7 @@ function splitCaseAdvice(items, groupCount, location = '', freeLocations = []) {
   const candidates = [
     splitColorCandidate(annotated, count),
     ...splitFeatureCandidates(annotated, count),
+    splitDomainCandidate(annotated, count),
     splitFamilyCandidate(annotated, count),
     splitSizeCandidate(annotated, count),
     splitFallbackCandidate(annotated, count)
