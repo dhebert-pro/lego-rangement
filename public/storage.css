@@ -41,6 +41,7 @@
 .advice-group header { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 11px 12px; background: var(--yellow); }
 .advice-group header span { font-size: 12px; font-weight: 850; text-transform: uppercase; }
 .advice-group header strong { font-size: 18px; }
+.advice-group h4 { margin: 0; padding: 12px 12px 3px; color: #173f2e; font-size: 16px; line-height: 1.25; }
 .advice-metrics { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 10px 0; }
 .advice-metrics b { padding: 4px 7px; border-radius: 99px; background: #eaf5fb; color: #194f6d; font-size: 11px; }
 .advice-group ul { min-height: 72px; margin: 9px 12px 12px; padding-left: 18px; color: #57635e; font-size: 11px; }

@@ -61,6 +61,39 @@ test('conseille une division cohérente sans perdre de référence', () => {
   const brickGroups = advice.groups.flatMap((group, groupIndex) => group.items.filter(item => item.partNum === '3001').map(() => groupIndex));
   assert.equal(new Set(brickGroups).size, 1);
 });
+test('privilégie une caractéristique nommable même si les quantités sont très déséquilibrées', () => {
+  const items = [
+    { partNum: '85861', name: 'Plate Round 1 x 1 with Open Stud', colorName: 'Red', quantity: 100 },
+    { partNum: '6141', name: 'Plate Round 1 x 1 with Solid Stud', colorName: 'Red', quantity: 1 }
+  ];
+  const advice = splitCaseAdvice(items, 2, 'A1', ['A2']);
+  assert.equal(advice.criterion, 'ouverture sur le dessus');
+  assert.deepEqual(advice.groups.map(group => group.label), ['Avec une ouverture sur le dessus', 'Sans ouverture sur le dessus']);
+  assert.deepEqual(advice.groups.map(group => group.quantity), [100, 1]);
+});
+test('sépare les couleurs proches quand une case contient une seule forme', () => {
+  const colors = [
+    ['Black', 10], ['Dark Bluish Gray', 9], ['White', 8], ['Light Bluish Gray', 7], ['Red', 6], ['Blue', 5]
+  ];
+  const advice = splitCaseAdvice(colors.map(([colorName, quantity], colorId) => ({ partNum: '3001', name: 'Brick 2 x 4', colorName, colorId, quantity })), 2, 'B1', ['B2']);
+  assert.equal(advice.criterion, 'palettes de couleurs contrastées');
+  const groupForColor = colorName => advice.groups.findIndex(group => group.items.some(item => item.colorName === colorName));
+  assert.notEqual(groupForColor('Black'), groupForColor('Dark Bluish Gray'));
+  assert.notEqual(groupForColor('White'), groupForColor('Light Bluish Gray'));
+  assert.ok(advice.groups.every(group => group.label.startsWith('Couleurs : ')));
+});
+test('peut nommer les groupes par leur gabarit plutôt que par leur quantité', () => {
+  const items = [
+    { partNum: 'custom1', name: 'Special Element Alpha', colorName: 'Red', quantity: 40, physical: { dimensionsCm: [1.6, .96, 1.6], volumeCm3: 2.458 } },
+    { partNum: 'custom2', name: 'Special Element Beta', colorName: 'Red', quantity: 30, physical: { dimensionsCm: [.8, .96, 1.6], volumeCm3: 1.229 } },
+    { partNum: 'custom3', name: 'Special Element Gamma', colorName: 'Red', quantity: 2, physical: { dimensionsCm: [4, .96, 3.2], volumeCm3: 12.288 } },
+    { partNum: 'custom4', name: 'Special Element Delta', colorName: 'Red', quantity: 1, physical: { dimensionsCm: [6.4, .96, .8], volumeCm3: 4.915 } }
+  ];
+  const advice = splitCaseAdvice(items, 2, 'C1', ['C2']);
+  assert.equal(advice.criterion, 'gabarit au sol en tenons');
+  assert.deepEqual(advice.groups.map(group => group.label), ['Gabarit jusqu’à 2×2', 'Gabarit supérieur à 2×2']);
+  assert.deepEqual(advice.groups.map(group => group.quantity), [70, 3]);
+});
 test('conserve uniquement le trajet entre la première et la dernière case', () => {
   const first = consolidateMoveHistory([], [{ partNum: '3001', colorId: 1, fromLocation: 'A1', toLocation: 'B1' }]);
   const second = consolidateMoveHistory(first, [{ partNum: '3001', colorId: 1, fromLocation: 'B1', toLocation: 'C1' }]);

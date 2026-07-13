@@ -77,7 +77,8 @@ function renderSplitAdvice(data) {
   splitAdvice.innerHTML = `<div class="advice-heading"><div><p class="eyebrow">CONSEIL DE RÉPARTITION</p><h3>Scinder la case ${escapeHtml(data.location)} en ${data.groupCount}</h3></div><p>${escapeHtml(data.method)}</p></div>
     <div class="advice-groups" style="--advice-columns:${data.groupCount}">${data.groups.map(group => `<article class="advice-group">
       <header><span>Groupe ${group.index}</span><strong>${group.suggestedLocation ? `Case ${escapeHtml(group.suggestedLocation)}` : 'Case libre à choisir'}</strong></header>
-      <div class="advice-metrics"><b>${group.referenceCount} réf.</b><b>${group.quantity} pièces</b><b>≈ ${group.estimatedSharePercent}% du volume</b></div>
+      <h4>${escapeHtml(group.label)}</h4>
+      <div class="advice-metrics"><b>${group.referenceCount} réf.</b><b>${group.quantity} pièces</b><b>${group.estimatedSharePercent}% des pièces</b></div>
       <ul>${group.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>
       <div class="advice-parts">${group.items.map(item => `<div class="advice-part">
         <span class="advice-thumb">${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" data-preview alt="Agrandir ${escapeHtml(item.name)}">` : '◫'}</span>

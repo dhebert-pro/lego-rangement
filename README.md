@@ -28,7 +28,7 @@ Les déplacements sont enregistrés sur le serveur du PC et sont donc partagés 
 
 Les cases libres sont calculées dans le référentiel fixe des rangements existants : `1` à `3`, puis `A1` à `A9` jusqu’à `AB1` à `AB9`. Elles sont recalculées après chaque déplacement ou restauration. Les images exactes de chaque couleur sont chargées progressivement puis mises en cache localement.
 
-Depuis le contenu d’une case, deux boutons proposent une division en 2 ou en 3. Le conseil privilégie la cohérence visuelle et d’usage, sépare les formes faciles à confondre, puis équilibre le volume estimé à partir des dimensions LDraw et des quantités. Il ne déplace aucune pièce automatiquement : les cases libres proposées restent des suggestions.
+Depuis le contenu d’une case, deux boutons proposent une division en 2 ou en 3. Chaque groupe reçoit un nom explicite fondé en priorité sur une caractéristique observable : famille d’utilisation, trou ou ouverture, partie d’animal ou de figurine, gabarit, ou palette de couleurs. La facilité de repérage vient ensuite ; l’équilibre du nombre de pièces n’est utilisé qu’en troisième critère. Il ne déplace aucune pièce automatiquement : les cases libres proposées restent des suggestions.
 
 Les miniatures des deux pages s’agrandissent au survol sur ordinateur et au toucher sur téléphone.
 

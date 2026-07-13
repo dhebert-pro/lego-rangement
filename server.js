@@ -535,43 +535,48 @@ async function storageCase(location) {
   };
 }
 
-function splitFamily(name) {
-  const value = String(name || '').toLocaleLowerCase('en').normalize('NFD').replace(/[\u0300-\u036f]/g, ' ');
-  const rules = [
-    [/technic|axle|pin\b|liftarm|gear|rack|connector|bionicle/, 'Technic, axes et connecteurs'],
-    [/clip|bar\b|handle|hinge|joint|arm\b|lever|hook|towball|droid/, 'Clips, barres et articulations'],
-    [/wheel|tire|tyre|rim|hub|mudguard|track/, 'Roues et éléments roulants'],
-    [/minifig|torso|head\b|hair|helmet|weapon|sword|gun\b|shield|leg\b|cape/, 'Minifigurines et accessoires'],
-    [/window|door|windscreen|panel|fence|gate/, 'Panneaux, portes et fenêtres'],
-    [/slope|wedge|arch|curve|curved|bow\b/, 'Pentes et formes courbes'],
-    [/tile|macaroni|grille|grill/, 'Tuiles et surfaces lisses'],
-    [/plate/, 'Plaques'],
-    [/brick/, 'Briques'],
-    [/cone|cylinder|dish|round|wheel|ball|sphere/, 'Pièces rondes et cylindriques'],
-    [/plant|flower|leaf|animal|bird|dragon|food/, 'Décor, végétaux et animaux']
-  ];
-  return rules.find(([pattern]) => pattern.test(value))?.[1] || 'Formes spéciales et autres pièces';
-}
+const normalizeSplitText = value => String(value || '').toLocaleLowerCase('en').normalize('NFD').replace(/[\u0300-\u036f]/g, ' ');
 
 function splitShapeKey(partNum) {
   return String(partNum || '').toLocaleLowerCase('fr').replace(/pr\d.*$/i, '').replace(/[a-z]$/i, '');
 }
 
-function splitSizeBand(physical) {
-  const dimensions = physical?.dimensionsCm?.map(Number).filter(Number.isFinite) || [];
-  const longest = dimensions.length ? Math.max(...dimensions) : 0;
-  const volume = Number(physical?.volumeCm3) || 0;
-  if (!longest && !volume) return 'taille inconnue';
-  if (longest >= 8) return 'très longues ou grandes';
-  if (longest >= 4 || volume >= 16) return 'grandes';
-  if (longest >= 2 || volume >= 3) return 'moyennes';
-  return 'petites';
+function splitFamily(name) {
+  const value = normalizeSplitText(name);
+  const rules = [
+    [/animal|bird|dragon|dinosaur|tail\b|wing\b|horn\b|claw|paw|hoof|beak|droid|skeleton|minifig|torso|head\b|arm\b|leg\b/, ['figure', 'Parties d’animaux, de droïdes ou de figurines', 'personnages']],
+    [/technic|axle|pin\b|liftarm|gear|rack|connector|bionicle/, ['technic', 'Pièces LEGO Technic', 'mécanique']],
+    [/clip|bar\b|handle|hinge|joint|lever|hook|towball/, ['grip', 'Clips, barres et articulations', 'mécanique']],
+    [/wheel|tire|tyre|rim|hub|mudguard|track/, ['wheel', 'Roues et éléments roulants', 'mécanique']],
+    [/plate/, ['plate', 'Plaques', 'construction']],
+    [/tile|macaroni|grille|grill/, ['tile', 'Tuiles et surfaces lisses', 'construction']],
+    [/brick/, ['brick', 'Briques', 'construction']],
+    [/slope|wedge|arch|curve|curved|bow\b/, ['slope', 'Pentes et formes courbes', 'construction']],
+    [/cone|cylinder|dish|round|ball|sphere/, ['round', 'Pièces rondes et cylindriques', 'construction']],
+    [/plant|flower|leaf|food|weapon|sword|gun\b|shield|window|door|panel|fence/, ['decor', 'Décor et accessoires', 'personnages']]
+  ];
+  const match = rules.find(([pattern]) => pattern.test(value));
+  const [key, label, domain] = match?.[1] || ['special', 'Formes spéciales', 'spécial'];
+  return { key, label, domain };
+}
+
+function splitFeatures(name) {
+  const value = normalizeSplitText(name);
+  const topOpening = /hollow stud|open stud|open o stud|stud[^,]*(hole|open)|hole on top|top hole|upper hole|round opening/.test(value);
+  const hole = topOpening || /hole|opening|hollow|socket|axle connector|pin connector/.test(value);
+  return {
+    topOpening,
+    hole,
+    technic: /technic|axle|pin\b|liftarm|gear|rack|connector|bionicle/.test(value),
+    figure: /animal|bird|dragon|dinosaur|tail\b|wing\b|horn\b|claw|paw|hoof|beak|droid|skeleton|minifig|torso|head\b|arm\b|leg\b/.test(value),
+    grip: /clip|bar\b|handle|hinge|joint|lever|hook|towball/.test(value)
+  };
 }
 
 function splitColorBucket(colorName) {
-  const value = String(colorName || '').toLocaleLowerCase('en');
-  if (/black|dark bluish gray|dark gray|gun metal/.test(value)) return 'sombres neutres';
-  if (/white|light bluish gray|light gray|silver|pearl/.test(value)) return 'claires neutres';
+  const value = normalizeSplitText(colorName);
+  if (/black|dark bluish gray|dark gray|gun metal/.test(value)) return 'neutres sombres';
+  if (/white|light bluish gray|light gray|silver|pearl/.test(value)) return 'neutres claires';
   if (/red|coral|magenta|pink/.test(value)) return 'rouges et roses';
   if (/orange|yellow|tan|gold/.test(value)) return 'jaunes et orangées';
   if (/green|olive|lime/.test(value)) return 'vertes';
@@ -582,126 +587,207 @@ function splitColorBucket(colorName) {
   return value || 'couleur inconnue';
 }
 
-function splitItemWeight(item) {
-  const quantity = Math.max(1, Number(item.quantity) || 1);
-  const measuredVolume = Number(item.physical?.volumeCm3);
-  const unitVolume = Number.isFinite(measuredVolume) && measuredVolume > 0 ? Math.min(80, Math.max(0.08, measuredVolume)) : 1;
-  return quantity * unitVolume;
+function splitColorLabel(colorName) {
+  const value = normalizeSplitText(colorName);
+  const translations = [[/^black$/, 'Noir'], [/^white$/, 'Blanc'], [/^red$/, 'Rouge'], [/^blue$/, 'Bleu'], [/^yellow$/, 'Jaune'], [/^green$/, 'Vert'], [/^orange$/, 'Orange'], [/^dark bluish gray$/, 'Gris foncé'], [/^light bluish gray$/, 'Gris clair'], [/^reddish brown$/, 'Brun'], [/^tan$/, 'Beige']];
+  return translations.find(([pattern]) => pattern.test(value))?.[1] || String(colorName || 'Couleur inconnue');
+}
+
+function splitSizeProfile(physical) {
+  const dimensions = physical?.dimensionsCm?.map(Number) || [];
+  if (dimensions.length < 3 || !dimensions.every(value => Number.isFinite(value) && value > 0)) return null;
+  const studs = [dimensions[0], dimensions[2]].map(value => Math.max(1, Math.round(value / 0.8))).sort((a, b) => a - b);
+  const [shortSide, longSide] = studs;
+  const area = shortSide * longSide;
+  const label = `${shortSide}×${longSide}`;
+  return {
+    label,
+    group2: area <= 4 && longSide <= 2 ? 'small' : 'large',
+    group3: area <= 4 && longSide <= 2 ? 'small' : area <= 12 && longSide <= 4 ? 'medium' : 'large'
+  };
+}
+
+function splitQuantity(items) {
+  return items.reduce((sum, item) => sum + Math.max(1, Number(item.quantity) || 1), 0);
+}
+
+function splitCandidate(kind, criterion, groups, coherence, retrieval) {
+  if (groups.some(group => !group.items.length)) return null;
+  const total = groups.reduce((sum, group) => sum + splitQuantity(group.items), 0) || 1;
+  const quantities = groups.map(group => splitQuantity(group.items));
+  const balance = 100 - (Math.max(...quantities) - Math.min(...quantities)) / total * 100;
+  return { kind, criterion, groups, coherence, retrieval, balance };
+}
+
+function splitFeatureCandidates(items, count) {
+  const candidates = [];
+  if (count === 2) {
+    const definitions = [
+      ['topOpening', 'ouverture sur le dessus', 'Avec une ouverture sur le dessus', 'Sans ouverture sur le dessus'],
+      ['hole', 'présence d’un trou ou d’une ouverture', 'Avec un trou ou une ouverture', 'Sans trou ni ouverture détecté'],
+      ['technic', 'usage LEGO Technic', 'Pièces LEGO Technic', 'Pièces LEGO System et accessoires'],
+      ['figure', 'usage figurine ou animal', 'Parties d’animaux, de droïdes ou de figurines', 'Pièces de construction et accessoires'],
+      ['grip', 'présence d’une prise', 'Avec clip, barre, poignée ou articulation', 'Sans clip, barre ni poignée']
+    ];
+    for (const [feature, criterion, yesLabel, noLabel] of definitions) {
+      const groups = [{ label: yesLabel, items: items.filter(item => item._features[feature]) }, { label: noLabel, items: items.filter(item => !item._features[feature]) }];
+      if (groups.some(group => !group.items.length)) continue;
+      const maxFamilies = Math.max(...groups.map(group => new Set(group.items.map(item => item._family.key)).size));
+      candidates.push(splitCandidate('feature', criterion, groups, Math.max(55, 99 - (maxFamilies - 1) * 6), 98));
+    }
+  } else {
+    const groups = [
+      { label: 'Ouverture sur le dessus', items: items.filter(item => item._features.topOpening) },
+      { label: 'Autre trou ou connexion', items: items.filter(item => item._features.hole && !item._features.topOpening) },
+      { label: 'Sans trou ni ouverture détecté', items: items.filter(item => !item._features.hole) }
+    ];
+    if (groups.every(group => group.items.length)) {
+      const maxFamilies = Math.max(...groups.map(group => new Set(group.items.map(item => item._family.key)).size));
+      candidates.push(splitCandidate('feature', 'position des trous et ouvertures', groups, Math.max(60, 100 - (maxFamilies - 1) * 5), 99));
+    }
+  }
+  return candidates.filter(Boolean);
+}
+
+function splitColorCandidate(items, count) {
+  const shapes = new Set(items.map(item => item._shape));
+  const byColor = new Map();
+  for (const item of items) {
+    const key = String(item.colorName || item.colorId || 'Couleur inconnue');
+    if (!byColor.has(key)) byColor.set(key, { name: key, bucket: item._color, items: [] });
+    byColor.get(key).items.push(item);
+  }
+  if (shapes.size > 2 || byColor.size < count) return null;
+  const entries = [...byColor.values()].sort((a, b) => a.bucket.localeCompare(b.bucket, 'fr') || splitQuantity(b.items) - splitQuantity(a.items));
+  const groups = Array.from({ length: count }, () => ({ entries: [], items: [], buckets: new Set() }));
+  for (const entry of entries) {
+    const empty = groups.filter(group => !group.entries.length);
+    const candidates = empty.length >= entries.length - groups.reduce((sum, group) => sum + group.entries.length, 0) ? empty : groups;
+    const destination = [...candidates].sort((a, b) => Number(a.buckets.has(entry.bucket)) - Number(b.buckets.has(entry.bucket)) || a.entries.length - b.entries.length || splitQuantity(a.items) - splitQuantity(b.items))[0];
+    destination.entries.push(entry);
+    destination.items.push(...entry.items);
+    destination.buckets.add(entry.bucket);
+  }
+  const repeatedBuckets = groups.reduce((sum, group) => sum + group.entries.length - group.buckets.size, 0);
+  return splitCandidate('color', 'palettes de couleurs contrastées', groups.map(group => ({
+    label: `Couleurs : ${group.entries.map(entry => splitColorLabel(entry.name)).join(', ')}`,
+    items: group.items
+  })), shapes.size === 1 ? 100 : 95, Math.max(70, 100 - repeatedBuckets * 7));
+}
+
+function splitSizeCandidate(items, count) {
+  if (items.some(item => !item._size)) return null;
+  const definitions = count === 2
+    ? [['small', 'Gabarit jusqu’à 2×2'], ['large', 'Gabarit supérieur à 2×2']]
+    : [['small', 'Gabarit jusqu’à 2×2'], ['medium', 'Gabarit moyen, de 2×3 à 3×4 environ'], ['large', 'Grand gabarit, au-delà de 3×4 environ']];
+  const key = count === 2 ? 'group2' : 'group3';
+  return splitCandidate('size', 'gabarit au sol en tenons', definitions.map(([value, label]) => ({ label, items: items.filter(item => item._size[key] === value) })), 94, 97);
+}
+
+function splitFamilyCandidate(items, count) {
+  const byFamily = new Map();
+  for (const item of items) {
+    if (!byFamily.has(item._family.key)) byFamily.set(item._family.key, { ...item._family, items: [] });
+    byFamily.get(item._family.key).items.push(item);
+  }
+  const entries = [...byFamily.values()];
+  if (entries.length < count) return null;
+  let best = null;
+  const assignments = Array(entries.length).fill(0);
+  function visit(index) {
+    if (index === entries.length) {
+      const bins = Array.from({ length: count }, () => []);
+      entries.forEach((entry, entryIndex) => bins[assignments[entryIndex]].push(entry));
+      if (bins.some(bin => !bin.length)) return;
+      const maxFamilies = Math.max(...bins.map(bin => bin.length));
+      const maxDomains = Math.max(...bins.map(bin => new Set(bin.map(entry => entry.domain)).size));
+      const groups = bins.map(bin => ({ label: bin.map(entry => entry.label).join(' + '), items: bin.flatMap(entry => entry.items) }));
+      const candidate = splitCandidate('family', 'familles visuelles ou d’utilisation', groups, Math.max(60, 104 - (maxFamilies - 1) * 5 - (maxDomains - 1) * 6), Math.max(65, 98 - (maxFamilies - 1) * 4));
+      if (!best || compareSplitCandidates(candidate, best) < 0) best = candidate;
+      return;
+    }
+    for (let group = 0; group < count; group += 1) {
+      assignments[index] = group;
+      visit(index + 1);
+    }
+  }
+  assignments[0] = 0;
+  visit(1);
+  return best;
+}
+
+function splitFallbackCandidate(items, count) {
+  const byShape = new Map();
+  for (const item of items) {
+    if (!byShape.has(item._shape)) byShape.set(item._shape, []);
+    byShape.get(item._shape).push(item);
+  }
+  let blocks = [...byShape.entries()].map(([shape, shapeItems]) => ({ shape, items: shapeItems, quantity: splitQuantity(shapeItems) }));
+  if (blocks.length < count) blocks = items.map(item => ({ shape: item.partNum, items: [item], quantity: splitQuantity([item]) }));
+  blocks.sort((a, b) => b.quantity - a.quantity);
+  const groups = Array.from({ length: count }, () => ({ blocks: [], items: [] }));
+  blocks.forEach((block, index) => {
+    const destination = index < count ? groups[index] : [...groups].sort((a, b) => splitQuantity(a.items) - splitQuantity(b.items))[0];
+    destination.blocks.push(block);
+    destination.items.push(...block.items);
+  });
+  return splitCandidate('shape', 'formes exactes', groups.map(group => ({ label: `Formes : ${group.blocks.map(block => block.shape).join(', ')}`, items: group.items })), 70, 75);
+}
+
+function compareSplitCandidates(a, b) {
+  return b.coherence - a.coherence || b.retrieval - a.retrieval || b.balance - a.balance || a.kind.localeCompare(b.kind);
 }
 
 function splitCaseAdvice(items, groupCount, location = '', freeLocations = []) {
   const count = Number(groupCount);
   if (![2, 3].includes(count)) throw new Error('Choisissez une division en 2 ou en 3.');
   if (!Array.isArray(items) || items.length < count) throw new Error(`Cette case doit contenir au moins ${count} références pour être divisée en ${count}.`);
-
-  const annotated = items.map((item, index) => ({
+  const annotated = items.map(item => ({
     ...item,
-    _index: index,
-    _family: splitFamily(item.name),
     _shape: splitShapeKey(item.partNum),
-    _size: splitSizeBand(item.physical),
+    _family: splitFamily(item.name),
+    _features: splitFeatures(item.name),
     _color: splitColorBucket(item.colorName),
-    _weight: splitItemWeight(item)
+    _size: splitSizeProfile(item.physical)
   }));
-  const byShape = new Map();
-  for (const item of annotated) {
-    const key = `${item._family}|${item._shape}`;
-    if (!byShape.has(key)) byShape.set(key, { family: item._family, shape: item._shape, items: [], weight: 0, sizes: new Set(), colors: new Set() });
-    const block = byShape.get(key);
-    block.items.push(item);
-    block.weight += item._weight;
-    block.sizes.add(item._size);
-    block.colors.add(item._color);
-  }
-  let blocks = [...byShape.values()];
-  if (blocks.length < count) {
-    blocks = annotated.map(item => ({ family: item._family, shape: item._shape, items: [item], weight: item._weight, sizes: new Set([item._size]), colors: new Set([item._color]) }));
-  }
-  blocks.sort((a, b) => b.weight - a.weight || b.items.length - a.items.length || a.shape.localeCompare(b.shape, 'fr', { numeric: true }));
-
-  const totalWeight = blocks.reduce((sum, block) => sum + block.weight, 0);
-  const targetWeight = totalWeight / count || 1;
-  const groups = Array.from({ length: count }, (_, index) => ({ index, blocks: [], weight: 0, families: new Set(), sizes: new Set(), colors: new Set() }));
-  for (const block of blocks) {
-    const emptyGroups = groups.filter(group => !group.blocks.length);
-    const remainingBlocks = blocks.length - groups.reduce((sum, group) => sum + group.blocks.length, 0);
-    const candidates = emptyGroups.length >= remainingBlocks ? emptyGroups : groups;
-    const ranked = candidates.map(group => {
-      const projected = group.weight + block.weight;
-      const balance = Math.abs(projected - targetWeight) / targetWeight;
-      const overfill = Math.max(0, projected - targetWeight * 1.15) / targetWeight * 8;
-      const family = !group.blocks.length ? 0 : group.families.has(block.family) ? -0.45 : 0.24;
-      const sizeOverlap = [...block.sizes].some(size => group.sizes.has(size)) ? -0.12 : 0.05;
-      const confusingColors = [...block.colors].filter(color => group.colors.has(color)).length * 0.13;
-      return { group, score: balance + overfill + family + sizeOverlap + confusingColors };
-    }).sort((a, b) => a.score - b.score || a.group.weight - b.group.weight || a.group.index - b.group.index);
-    const destination = ranked[0].group;
-    destination.blocks.push(block);
-    destination.weight += block.weight;
-    destination.families.add(block.family);
-    block.sizes.forEach(size => destination.sizes.add(size));
-    block.colors.forEach(color => destination.colors.add(color));
-  }
-
-  // A final pass corrects a lopsided result without ever separating color variants
-  // of the same shape. It prefers moving a block into a group that already uses
-  // the same family, so physical balance does not erase visual coherence.
-  for (let iteration = 0; iteration < blocks.length * 2; iteration += 1) {
-    const ordered = [...groups].sort((a, b) => b.weight - a.weight);
-    const heavy = ordered[0];
-    const light = ordered[ordered.length - 1];
-    const currentGap = heavy.weight - light.weight;
-    const movable = heavy.blocks.filter(() => heavy.blocks.length > 1).map(block => {
-      const nextGap = Math.abs((heavy.weight - block.weight) - (light.weight + block.weight));
-      const familyPenalty = light.families.has(block.family) ? -targetWeight * 0.08 : targetWeight * 0.04;
-      return { block, score: nextGap + familyPenalty, nextGap };
-    }).filter(candidate => candidate.nextGap < currentGap);
-    movable.sort((a, b) => a.score - b.score || a.block.weight - b.block.weight);
-    if (!movable.length) break;
-    const block = movable[0].block;
-    heavy.blocks.splice(heavy.blocks.indexOf(block), 1);
-    light.blocks.push(block);
-    heavy.weight -= block.weight;
-    light.weight += block.weight;
-    for (const group of [heavy, light]) {
-      group.families = new Set(group.blocks.map(item => item.family));
-      group.sizes = new Set(group.blocks.flatMap(item => [...item.sizes]));
-      group.colors = new Set(group.blocks.flatMap(item => [...item.colors]));
-    }
-  }
-
+  const candidates = [
+    splitColorCandidate(annotated, count),
+    ...splitFeatureCandidates(annotated, count),
+    splitFamilyCandidate(annotated, count),
+    splitSizeCandidate(annotated, count),
+    splitFallbackCandidate(annotated, count)
+  ].filter(Boolean).sort(compareSplitCandidates);
+  const selected = candidates[0];
+  const totalQuantity = splitQuantity(annotated) || 1;
   const suggestedLocations = [String(location || ''), ...freeLocations.map(item => typeof item === 'string' ? item : item.location).filter(Boolean)];
   const cleanItem = item => {
-    const { _index, _family, _shape, _size, _color, _weight, ...original } = item;
+    const { _shape, _family, _features, _color, _size, ...original } = item;
     return original;
   };
-  const resultGroups = groups.map((group, index) => {
-    const groupItems = group.blocks.flatMap(block => block.items).sort((a, b) => a._family.localeCompare(b._family, 'fr') || a.name.localeCompare(b.name, 'fr', { numeric: true }));
-    const quantity = groupItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-    const measuredCount = groupItems.filter(item => item.physical?.volumeCm3).length;
-    const preservedShapes = group.blocks.filter(block => block.items.length > 1).length;
-    const families = [...group.families];
-    const reasons = [
-      families.length === 1 ? `Une famille principale : ${families[0]}.` : `Familles visuelles : ${families.slice(0, 3).join(', ')}.`,
-      preservedShapes ? `${preservedShapes} forme${preservedShapes === 1 ? '' : 's'} avec plusieurs couleurs conservée${preservedShapes === 1 ? '' : 's'} ensemble.` : 'Formes distinctes séparées autant que possible.',
-      measuredCount ? `Équilibre calculé avec les dimensions de ${measuredCount}/${groupItems.length} références.` : 'Équilibre estimé avec les quantités (dimensions indisponibles).'
-    ];
-    return {
-      index: index + 1,
-      suggestedLocation: suggestedLocations[index] || '',
-      referenceCount: groupItems.length,
-      quantity,
-      estimatedSharePercent: Math.round(group.weight / totalWeight * 100),
-      families,
-      reasons,
-      items: groupItems.map(cleanItem)
-    };
-  });
   return {
     location: String(location || ''),
     groupCount: count,
-    method: 'Cohérence de forme et d’usage, facilité de distinction, puis équilibre du volume et des quantités.',
-    groups: resultGroups
+    criterion: selected.criterion,
+    method: `Critère retenu : ${selected.criterion}. La cohérence nommable est prioritaire, puis la facilité de repérage ; l’équilibre du nombre de pièces arrive en dernier.`,
+    scores: { coherence: Math.round(selected.coherence), retrieval: Math.round(selected.retrieval), balance: Math.round(selected.balance) },
+    groups: selected.groups.map((group, index) => {
+      const groupItems = group.items.sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }) || String(a.colorName).localeCompare(String(b.colorName), 'fr'));
+      const quantity = splitQuantity(groupItems);
+      return {
+        index: index + 1,
+        label: group.label,
+        suggestedLocation: suggestedLocations[index] || '',
+        referenceCount: groupItems.length,
+        quantity,
+        estimatedSharePercent: Math.round(quantity / totalQuantity * 100),
+        reasons: [
+          `Cohérence : ${group.label}.`,
+          selected.kind === 'color' ? 'Les couleurs proches sont séparées autant que possible pour faciliter la recherche.' : `Repérage fondé sur ${selected.criterion}.`,
+          `${Math.round(quantity / totalQuantity * 100)} % des pièces ; cet équilibre n’a été utilisé qu’après les deux critères précédents.`
+        ],
+        items: groupItems.map(cleanItem)
+      };
+    })
   };
 }
 
