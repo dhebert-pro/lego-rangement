@@ -455,25 +455,14 @@ function occupiedCases(mappings) {
   })).sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
 }
 
+function storageCaseUniverse() {
+  const prefixes = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'ABCDEF'].map((letter, index) => index < 26 ? letter : `A${letter}`);
+  return ['1', '2', '3', ...prefixes.flatMap(prefix => Array.from({ length: 9 }, (_, index) => `${prefix}${index + 1}`))];
+}
+
 function inferredEmptyCases(mappings) {
   const occupied = new Set(occupiedCases(mappings).map(item => item.location.toLocaleUpperCase()));
-  const groups = new Map();
-  for (const location of occupied) {
-    const match = location.match(/^([A-Z]*)(\d+)$/);
-    if (!match) continue;
-    const prefix = match[1];
-    groups.set(prefix, [...(groups.get(prefix) || []), Number(match[2])]);
-  }
-  const alphaMax = Math.max(0, ...[...groups.entries()].filter(([prefix]) => prefix).flatMap(([, values]) => values));
-  const empty = [];
-  for (const [prefix, values] of groups) {
-    const maximum = prefix ? alphaMax : Math.max(...values);
-    for (let number = 1; number <= maximum; number += 1) {
-      const location = `${prefix}${number}`;
-      if (!occupied.has(location)) empty.push({ location });
-    }
-  }
-  return empty.sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
+  return storageCaseUniverse().filter(location => !occupied.has(location)).map(location => ({ location }));
 }
 
 function moveStorageMappings(mappings, input) {
@@ -955,4 +944,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange, networkUrls, server };

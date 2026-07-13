@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -35,11 +35,12 @@ test('déplace plusieurs références et détecte une case vidée', () => {
   assert.deepEqual(result.moved.map(item => [item.fromLocation, item.toLocation]), [['C2', 'E1'], ['C2', 'E1']]);
 });
 test('déduit les cases libres dans les séries de rangement', () => {
-  assert.deepEqual(inferredEmptyCases([
-    { partNum: '1', colorId: 1, location: 'A1' },
-    { partNum: '2', colorId: 1, location: 'A3' },
-    { partNum: '3', colorId: 1, location: 'B2' }
-  ]).map(item => item.location), ['A2', 'B1', 'B3']);
+  const universe = storageCaseUniverse();
+  assert.equal(universe.length, 291);
+  assert.deepEqual(universe.slice(0, 5), ['1', '2', '3', 'A1', 'A2']);
+  assert.deepEqual(universe.slice(-3), ['AF7', 'AF8', 'AF9']);
+  const occupied = universe.filter(location => !['2', 'A2', 'AF9'].includes(location)).map((location, index) => ({ partNum: String(index), colorId: 1, location }));
+  assert.deepEqual(inferredEmptyCases(occupied).map(item => item.location), ['2', 'A2', 'AF9']);
 });
 test('conserve uniquement le trajet entre la première et la dernière case', () => {
   const first = consolidateMoveHistory([], [{ partNum: '3001', colorId: 1, fromLocation: 'A1', toLocation: 'B1' }]);
