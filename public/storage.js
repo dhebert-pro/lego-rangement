@@ -12,6 +12,9 @@ let occupiedCases = [];
 let emptyCases = [];
 let currentCase = '';
 let currentItems = [];
+let currentAdvice = null;
+let extensionReady = false;
+const pendingExtensionSync = new Map();
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
 
@@ -20,6 +23,36 @@ async function request(url, options) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Opération impossible.');
   return data;
+}
+
+window.addEventListener('message', event => {
+  const message = event.data;
+  if (event.source !== window || message?.source !== 'LEGO_RANGEMENT_EXTENSION') return;
+  if (message.type === 'READY') {
+    extensionReady = true;
+    document.querySelector('#resyncLocations').disabled = false;
+    return;
+  }
+  if (message.type !== 'SYNC_RESULT') return;
+  const pending = pendingExtensionSync.get(message.requestId);
+  if (!pending) return;
+  pendingExtensionSync.delete(message.requestId);
+  message.result?.ok ? pending.resolve(message.result) : pending.reject(new Error(message.result?.error || 'Synchronisation Chrome impossible.'));
+});
+
+function syncLocationsViaExtension() {
+  if (!extensionReady) return Promise.reject(new Error('Ouvrez cette page depuis Chrome avec le module LEGO Rangement actif.'));
+  return new Promise((resolve, reject) => {
+    const requestId = `${Date.now()}-${Math.random()}`;
+    pendingExtensionSync.set(requestId, { resolve, reject });
+    const message = { source: 'LEGO_RANGEMENT_APP', type: 'SYNC', requestId, mode: 'locations', url: 'https://rebrickable.com/users/sourivore/partlists/108467/' };
+    window.postMessage(message, location.origin);
+    setTimeout(() => {
+      if (!pendingExtensionSync.has(requestId)) return;
+      pendingExtensionSync.delete(requestId);
+      reject(new Error('Le module Chrome n’a pas répondu.'));
+    }, 45000);
+  });
 }
 
 function updateSelection() {
@@ -54,6 +87,7 @@ async function loadCase(location) {
   caseStatus.textContent = 'Chargement des pièces et de leurs images…';
   caseItems.innerHTML = '';
   splitAdvice.innerHTML = '';
+  currentAdvice = null;
   adviceActions.hidden = true;
   caseActions.hidden = true;
   moveForm.hidden = true;
@@ -74,18 +108,20 @@ async function loadCase(location) {
 }
 
 function renderSplitAdvice(data) {
+  currentAdvice = data;
   splitAdvice.innerHTML = `<div class="advice-heading"><div><p class="eyebrow">CONSEIL DE RÉPARTITION</p><h3>Scinder la case ${escapeHtml(data.location)} en ${data.groupCount}</h3></div><p>${escapeHtml(data.method)}</p></div>
     <div class="advice-groups" style="--advice-columns:${data.groupCount}">${data.groups.map(group => `<article class="advice-group">
       <header><span>Groupe ${group.index}</span><strong>${group.suggestedLocation ? `Case ${escapeHtml(group.suggestedLocation)}` : 'Case libre à choisir'}</strong></header>
       <h4>${escapeHtml(group.label)}</h4>
       <div class="advice-metrics"><b>${group.referenceCount} réf.</b><b>${group.quantity} pièces</b><b>${group.estimatedSharePercent}% des pièces</b></div>
       <ul>${group.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>
+      <div class="advice-move"><label>Case destination<input data-advice-target="${group.index}" list="allCases" value="${escapeHtml(group.suggestedLocation)}" autocomplete="off"></label><button type="button" data-move-advice-group="${group.index}">Déplacer ce groupe</button></div>
       <div class="advice-parts">${group.items.map(item => `<div class="advice-part">
         <span class="advice-thumb">${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" data-preview alt="Agrandir ${escapeHtml(item.name)}">` : '◫'}</span>
         <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.colorName || 'Couleur inconnue')} · ${escapeHtml(item.partNum)}</small></span>
         <b>${item.quantity == null ? 'Qté ?' : `× ${item.quantity}`}</b>
       </div>`).join('')}</div>
-    </article>`).join('')}</div>`;
+    </article>`).join('')}</div><div class="apply-advice"><button type="button" data-apply-advice>Appliquer tout le découpage</button><span>Les déplacements seront ajoutés à l’historique.</span></div>`;
 }
 
 adviceActions.addEventListener('click', async event => {
@@ -102,6 +138,40 @@ adviceActions.addEventListener('click', async event => {
   } finally {
     adviceActions.querySelector('[data-advice-groups="2"]').disabled = currentItems.length < 2;
     adviceActions.querySelector('[data-advice-groups="3"]').disabled = currentItems.length < 3;
+  }
+});
+
+splitAdvice.addEventListener('click', async event => {
+  const groupButton = event.target.closest('[data-move-advice-group]');
+  const allButton = event.target.closest('[data-apply-advice]');
+  if ((!groupButton && !allButton) || !currentAdvice) return;
+  const controls = [...splitAdvice.querySelectorAll('[data-advice-target]')];
+  const groups = currentAdvice.groups.map(group => ({
+    ...group,
+    toLocation: controls.find(input => Number(input.dataset.adviceTarget) === group.index)?.value.trim() || ''
+  }));
+  const button = groupButton || allButton;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Déplacement…';
+  try {
+    let result;
+    if (groupButton) {
+      const group = groups.find(item => item.index === Number(groupButton.dataset.moveAdviceGroup));
+      if (!group?.toLocation) throw new Error('Indiquez une case de destination.');
+      if (group.toLocation.toLocaleLowerCase('fr') === currentCase.toLocaleLowerCase('fr')) throw new Error('Choisissez une autre case pour déplacer ce groupe.');
+      result = await request('/api/storage/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fromLocation: currentCase, toLocation: group.toLocation, items: group.items }) });
+    } else {
+      result = await request('/api/storage/split', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fromLocation: currentCase, groups: groups.map(group => ({ toLocation: group.toLocation, items: group.items })) }) });
+    }
+    const source = currentCase;
+    await Promise.all([loadCases(), loadHistory()]);
+    await loadCase(source);
+    caseStatus.textContent = `${result.movedCount} référence${result.movedCount === 1 ? '' : 's'} déplacée${result.movedCount === 1 ? '' : 's'} depuis le découpage. Historique conservé.`;
+  } catch (error) {
+    caseStatus.textContent = error.message;
+    button.disabled = false;
+    button.textContent = originalText;
   }
 });
 
@@ -169,6 +239,24 @@ document.querySelector('#clearHistory').addEventListener('click', async () => {
   await loadCases();
   if (currentCase) await loadCase(currentCase);
   document.querySelector('#historyStatus').textContent = `${data.revertedCount || 0} pièce${data.revertedCount === 1 ? '' : 's'} replacée${data.revertedCount === 1 ? '' : 's'} dans la case d’origine. Historique effacé.`;
+});
+
+document.querySelector('#resyncLocations').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Synchronisation…';
+  caseStatus.textContent = 'Nouvel export de la liste Rebrickable et réapplication de l’historique en cours…';
+  try {
+    const result = await syncLocationsViaExtension();
+    await Promise.all([loadCases(), loadHistory()]);
+    if (currentCase) await loadCase(currentCase);
+    caseStatus.textContent = `${result.count} emplacements resynchronisés. Les déplacements de l’historique ont été conservés.`;
+  } catch (error) {
+    caseStatus.textContent = error.message;
+  } finally {
+    button.disabled = !extensionReady;
+    button.textContent = 'Resynchroniser Rebrickable';
+  }
 });
 
 Promise.all([loadCases(), loadHistory()]).catch(error => { caseStatus.textContent = error.message; });

@@ -26,9 +26,13 @@ La page **Gérer les cases** (`/storage.html`) affiche toutes les références p
 
 Les déplacements sont enregistrés sur le serveur du PC et sont donc partagés avec le téléphone. Une pièce déplacée plusieurs fois ne conserve qu’un trajet entre sa case d’origine et sa case actuelle. Le bouton **Vider l’historique** restaure toutes ces pièces dans leur case d’origine avant d’effacer le journal.
 
+Le bouton **Resynchroniser Rebrickable** de la page de gestion relance un export propre de la part list depuis Chrome. Le CSV redevient la source des emplacements, puis seuls les changements encore présents dans l’historique et les attributions manuelles explicites sont réappliqués. Une ancienne priorité locale sans historique ne peut donc plus écraser silencieusement Rebrickable.
+
 Les cases libres sont calculées dans le référentiel fixe des rangements existants : `1` à `3`, puis `A1` à `A9` jusqu’à `AB1` à `AB9`. Elles sont recalculées après chaque déplacement ou restauration. Les images exactes de chaque couleur sont chargées progressivement puis mises en cache localement.
 
 Depuis le contenu d’une case, deux boutons proposent une division en 2 ou en 3. Chaque groupe reçoit un nom explicite fondé en priorité sur une caractéristique observable : famille d’utilisation, trou ou ouverture, partie d’animal ou de figurine, gabarit, ou palette de couleurs. La facilité de repérage vient ensuite ; l’équilibre du nombre de pièces n’est utilisé qu’en troisième critère. Il ne déplace aucune pièce automatiquement : les cases libres proposées restent des suggestions.
+
+Après un conseil de découpage, la destination de chaque groupe peut être modifiée. **Déplacer ce groupe** applique uniquement le groupe choisi ; **Appliquer tout le découpage** enregistre l’ensemble de manière atomique. Dans les deux cas, les déplacements rejoignent le même historique consolidé que les déplacements manuels.
 
 Les miniatures des deux pages s’agrandissent au survol sur ordinateur et au toucher sur téléphone.
 

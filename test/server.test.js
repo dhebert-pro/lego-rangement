@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -33,6 +33,37 @@ test('déplace plusieurs références et détecte une case vidée', () => {
   assert.equal(result.sourceEmpty, true);
   assert.deepEqual(result.mappings.map(item => item.location), ['E1', 'E1', 'D4']);
   assert.deepEqual(result.moved.map(item => [item.fromLocation, item.toLocation]), [['C2', 'E1'], ['C2', 'E1']]);
+});
+test('applique un découpage complet en une seule opération', () => {
+  const mappings = [
+    { partNum: '3001', colorId: 1, location: 'I3' },
+    { partNum: '3002', colorId: 2, location: 'I3' },
+    { partNum: '3003', colorId: 3, location: 'I3' }
+  ];
+  const result = moveStorageGroups(mappings, { fromLocation: 'I3', groups: [
+    { toLocation: 'I3', items: [{ partNum: '3001', colorId: 1 }] },
+    { toLocation: 'A1', items: [{ partNum: '3002', colorId: 2 }] },
+    { toLocation: 'A2', items: [{ partNum: '3003', colorId: 3 }] }
+  ] });
+  assert.deepEqual(result.mappings.map(item => item.location), ['I3', 'A1', 'A2']);
+  assert.equal(result.moved.length, 2);
+  assert.equal(result.sourceEmpty, false);
+  assert.throws(() => moveStorageGroups(mappings, { fromLocation: 'I3', groups: [
+    { toLocation: 'A1', items: [{ partNum: '3001', colorId: 1 }] },
+    { toLocation: 'A1', items: [{ partNum: '3002', colorId: 2 }] }
+  ] }), /case différente/);
+});
+test('ignore les anciennes priorités sans historique lors d’une resynchronisation', () => {
+  const overrides = [
+    { partNum: '3023', colorId: 27, location: '17' },
+    { partNum: '3023', colorId: 4, location: 'W4' },
+    { partNum: '32531', colorId: 71, location: '17' },
+    { partNum: '9999', colorId: 1, location: 'M1', source: 'manual' }
+  ];
+  const history = [{ partNum: '3001', colorId: 0, originalLocation: 'A1', currentLocation: 'B1' }];
+  assert.deepEqual(authoritativeLocationOverrides(overrides, history).map(item => [item.partNum, item.location, item.source]), [
+    ['9999', 'M1', 'manual'], ['3001', 'B1', 'history']
+  ]);
 });
 test('déduit les cases libres dans les séries de rangement', () => {
   const universe = storageCaseUniverse();

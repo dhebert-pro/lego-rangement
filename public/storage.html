@@ -12,7 +12,7 @@
   <header class="storage-hero"><a class="page-switch" href="/">Ranger un modèle</a><img class="hero-brick" src="/brick.svg" alt="Brique de construction rouge en perspective"><div class="studs"><i></i><i></i><i></i><i></i></div><p class="eyebrow">GESTION DU STOCK</p><h1>Réorganiser<br><span>mes cases.</span></h1><p>Consultez le contenu d’une case, déplacez plusieurs références et gardez la trace de chaque changement.</p></header>
   <main class="storage-main">
     <section class="storage-card lookup-card">
-      <div class="section-title"><div><p class="eyebrow">CONTENU</p><h2>Afficher une case</h2></div><span id="occupiedCount"></span></div>
+      <div class="section-title"><div><p class="eyebrow">CONTENU</p><h2>Afficher une case</h2></div><div class="storage-heading-tools"><span id="occupiedCount"></span><button id="resyncLocations" type="button" class="secondary-button" disabled>Resynchroniser Rebrickable</button></div></div>
       <form id="caseForm" class="storage-form"><label for="caseLocation">Numéro de case</label><div><input id="caseLocation" list="occupiedCases" required placeholder="Ex. C2" autocomplete="off"><button>Afficher les pièces</button></div></form>
       <datalist id="occupiedCases"></datalist>
       <datalist id="allCases"></datalist>

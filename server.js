@@ -290,14 +290,41 @@ const normalized = value => String(value || '').replace(/^\uFEFF/, '').toLowerCa
 const mappingIdentity = item => `${String(item.partNum || '').trim()}|${item.colorId == null ? `name:${String(item.colorName || '').trim().toLocaleLowerCase('fr')}` : `id:${Number(item.colorId)}`}`;
 
 function applyLocationOverrides(mappings) {
-  const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
+  const overrides = authoritativeLocationOverrides(
+    readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [],
+    readJson(MOVE_HISTORY_PATH, { moves: [] }).moves || []
+  );
   const byIdentity = new Map(overrides.map(item => [mappingIdentity(item), item.location]));
   return (mappings || []).map(mapping => byIdentity.has(mappingIdentity(mapping)) ? { ...mapping, location: byIdentity.get(mappingIdentity(mapping)) } : mapping);
+}
+
+function authoritativeLocationOverrides(overrides, historyMoves) {
+  const active = new Map((overrides || []).filter(item => item.source === 'manual').map(item => [mappingIdentity(item), item]));
+  for (const move of consolidateMoveHistory(historyMoves || [], [])) {
+    active.set(mappingIdentity(move), {
+      partNum: move.partNum,
+      colorId: move.colorId,
+      colorName: move.colorName || '',
+      location: move.currentLocation || move.toLocation,
+      source: 'history'
+    });
+  }
+  return [...active.values()].filter(item => item.location);
+}
+
+function saveAuthoritativeLocationOverrides() {
+  const active = authoritativeLocationOverrides(
+    readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [],
+    readJson(MOVE_HISTORY_PATH, { moves: [] }).moves || []
+  );
+  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: active }, null, 2)}\n`, 'utf8');
+  return active;
 }
 
 function importLocations(content) {
   const mappings = applyLocationOverrides(mappingsFromCsv(content));
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ importedAt: new Date().toISOString(), mappings }, null, 2)}\n`, 'utf8');
+  saveAuthoritativeLocationOverrides();
   return mappings.length;
 }
 
@@ -408,6 +435,7 @@ function importLocationMappings(input) {
   })).filter(item => item.partNum && item.location));
   if (!mappings.length) throw new Error('Aucun emplacement détecté sur la page Rebrickable.');
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ importedAt: new Date().toISOString(), mappings }, null, 2)}\n`, 'utf8');
+  saveAuthoritativeLocationOverrides();
   return mappings.length;
 }
 
@@ -430,6 +458,11 @@ function assignLocation(input) {
   const current = readJson(LOCATIONS_PATH, { mappings: [] });
   const mappings = upsertLocationMapping(current.mappings, input);
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ ...current, importedAt: new Date().toISOString(), mappings }, null, 2)}\n`, 'utf8');
+  const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
+  const nextOverride = { ...mappings[mappings.length - 1], source: 'manual' };
+  const overrideMap = new Map(overrides.map(item => [mappingIdentity(item), item]));
+  overrideMap.set(mappingIdentity(nextOverride), nextOverride);
+  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: [...overrideMap.values()] }, null, 2)}\n`, 'utf8');
   return { mapping: mappings[mappings.length - 1], count: mappings.length };
 }
 
@@ -481,6 +514,36 @@ function moveStorageMappings(mappings, input) {
   });
   if (!moved.length) throw new Error('Aucune pièce sélectionnée n’a été trouvée dans cette case.');
   return { mappings: next, moved, sourceEmpty: !next.some(mapping => String(mapping.location || '').toLocaleLowerCase('fr') === fromLocation.toLocaleLowerCase('fr')) };
+}
+
+function moveStorageGroups(mappings, input) {
+  const fromLocation = String(input.fromLocation || '').trim();
+  const groups = Array.isArray(input.groups) ? input.groups : [];
+  if (!fromLocation) throw new Error('Indiquez la case de départ.');
+  if (![2, 3].includes(groups.length)) throw new Error('Le découpage doit contenir deux ou trois groupes.');
+  const destinations = groups.map(group => String(group.toLocation || '').trim());
+  if (destinations.some(destination => !destination)) throw new Error('Indiquez une case de destination pour chaque groupe.');
+  if (new Set(destinations.map(destination => destination.toLocaleLowerCase('fr'))).size !== destinations.length) throw new Error('Chaque groupe doit avoir une case différente.');
+  if (groups.some(group => !Array.isArray(group.items) || !group.items.length)) throw new Error('Chaque groupe doit contenir au moins une pièce.');
+  const selected = groups.flatMap(group => group.items).map(mappingIdentity);
+  if (new Set(selected).size !== selected.length) throw new Error('Une même pièce ne peut pas appartenir à plusieurs groupes.');
+  const available = new Set((mappings || []).filter(mapping => String(mapping.location || '').toLocaleLowerCase('fr') === fromLocation.toLocaleLowerCase('fr')).map(mappingIdentity));
+  if (selected.some(key => !available.has(key))) throw new Error('Le contenu de la case a changé. Relancez le conseil de découpage.');
+
+  let nextMappings = mappings || [];
+  const moved = [];
+  for (const group of groups) {
+    if (String(group.toLocation).trim().toLocaleLowerCase('fr') === fromLocation.toLocaleLowerCase('fr')) continue;
+    const result = moveStorageMappings(nextMappings, { fromLocation, toLocation: group.toLocation, items: group.items });
+    nextMappings = result.mappings;
+    moved.push(...result.moved);
+  }
+  if (!moved.length) throw new Error('Choisissez au moins une destination différente de la case actuelle.');
+  return {
+    mappings: nextMappings,
+    moved,
+    sourceEmpty: !nextMappings.some(mapping => String(mapping.location || '').toLocaleLowerCase('fr') === fromLocation.toLocaleLowerCase('fr'))
+  };
 }
 
 async function storageCatalog() {
@@ -895,24 +958,35 @@ function consolidateMoveHistory(existingMoves, movedItems, metadataItems = []) {
   return [...historyMap.values()];
 }
 
-function moveStorage(input) {
-  const current = readJson(LOCATIONS_PATH, { mappings: [] });
-  const result = moveStorageMappings(current.mappings || [], input);
+function saveStorageMoveResult(current, result, metadataItems) {
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ ...current, modifiedAt: new Date().toISOString(), mappings: result.mappings }, null, 2)}\n`, 'utf8');
 
   const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
   const overrideMap = new Map(overrides.map(item => [mappingIdentity(item), item]));
   const history = readJson(MOVE_HISTORY_PATH, { moves: [] });
-  history.moves = consolidateMoveHistory(history.moves || [], result.moved, input.items || []);
+  history.moves = consolidateMoveHistory(history.moves || [], result.moved, metadataItems || []);
   const changed = new Set(history.moves.map(mappingIdentity));
   result.moved.forEach(item => {
     const key = mappingIdentity(item);
-    if (changed.has(key)) overrideMap.set(key, { partNum: item.partNum, colorId: item.colorId, colorName: item.colorName || '', location: item.toLocation });
+    if (changed.has(key)) overrideMap.set(key, { partNum: item.partNum, colorId: item.colorId, colorName: item.colorName || '', location: item.toLocation, source: 'history' });
     else overrideMap.delete(key);
   });
   fs.writeFileSync(MOVE_HISTORY_PATH, `${JSON.stringify(history, null, 2)}\n`, 'utf8');
-  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: [...overrideMap.values()] }, null, 2)}\n`, 'utf8');
+  const activeOverrides = authoritativeLocationOverrides([...overrideMap.values()], history.moves);
+  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: activeOverrides }, null, 2)}\n`, 'utf8');
   return { movedCount: result.moved.length, sourceEmpty: result.sourceEmpty, historyCount: history.moves.length };
+}
+
+function moveStorage(input) {
+  const current = readJson(LOCATIONS_PATH, { mappings: [] });
+  return saveStorageMoveResult(current, moveStorageMappings(current.mappings || [], input), input.items || []);
+}
+
+function applyStorageSplit(input) {
+  const current = readJson(LOCATIONS_PATH, { mappings: [] });
+  const groups = Array.isArray(input.groups) ? input.groups : [];
+  const result = moveStorageGroups(current.mappings || [], input);
+  return saveStorageMoveResult(current, result, groups.flatMap(group => group.items || []));
 }
 
 function revertMoveHistory() {
@@ -925,7 +999,8 @@ function revertMoveHistory() {
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ ...current, modifiedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8');
 
   const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
-  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: overrides.filter(item => !originals.has(mappingIdentity(item))) }, null, 2)}\n`, 'utf8');
+  const remainingOverrides = authoritativeLocationOverrides(overrides.filter(item => !originals.has(mappingIdentity(item))), []);
+  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: remainingOverrides }, null, 2)}\n`, 'utf8');
   fs.writeFileSync(MOVE_HISTORY_PATH, `${JSON.stringify({ moves: [] }, null, 2)}\n`, 'utf8');
   return { moves: [], revertedCount: moves.length };
 }
@@ -1048,6 +1123,7 @@ function importBackup(filename, base64) {
   const cleaned = applyLocationOverrides([...unique.values()]);
   if (!cleaned.length) throw new Error('Aucun champ Location associé à une pièce n’a été trouvé dans cette sauvegarde.');
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ importedAt: new Date().toISOString(), source: filename, mappings: cleaned }, null, 2)}\n`, 'utf8');
+  saveAuthoritativeLocationOverrides();
   return cleaned.length;
 }
 
@@ -1225,6 +1301,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, moveStorage(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
+  if (req.method === 'POST' && req.url === '/api/storage/split') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      return send(res, 200, applyStorageSplit(JSON.parse(raw || '{}')));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
   if (req.method === 'GET' && req.url === '/api/storage/history') {
     const history = readJson(MOVE_HISTORY_PATH, { moves: [] });
     return send(res, 200, { moves: consolidateMoveHistory(history.moves || [], []) });
@@ -1258,4 +1340,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, splitCaseAdvice, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange, networkUrls, server };
