@@ -16,6 +16,7 @@ const MOVE_HISTORY_PATH = path.join(__dirname, 'move-history.local.json');
 const LOCATION_OVERRIDES_PATH = path.join(__dirname, 'location-overrides.local.json');
 const PART_CATALOG_PATH = path.join(__dirname, 'part-catalog.local.json');
 const COLOR_IMAGES_PATH = path.join(__dirname, 'color-images.local.json');
+const LOCATION_SOURCE_CSV_PATH = path.join(__dirname, 'locations-source.local.csv');
 const LDRAW_DIMENSIONS_PATH = path.join(__dirname, 'data', 'ldraw-dimensions.json');
 const STUDIO_META_PATH = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Stud.io', 'BLBrickMetaInfo') : path.join(os.homedir(), 'AppData', 'Local', 'Stud.io', 'BLBrickMetaInfo');
 
@@ -323,9 +324,58 @@ function saveAuthoritativeLocationOverrides() {
 
 function importLocations(content) {
   const mappings = applyLocationOverrides(mappingsFromCsv(content));
+  fs.writeFileSync(LOCATION_SOURCE_CSV_PATH, String(content || ''), 'utf8');
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ importedAt: new Date().toISOString(), mappings }, null, 2)}\n`, 'utf8');
   saveAuthoritativeLocationOverrides();
   return mappings.length;
+}
+
+function csvValue(value) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function rebrickableCsvWithLocations(content, mappings) {
+  const rows = parseCsv(content);
+  if (rows.length < 2) throw new Error('Resynchronisez d’abord la liste Rebrickable pour obtenir son export complet.');
+  const headers = rows[0].map(normalized);
+  const indexOf = aliases => headers.findIndex(header => aliases.includes(header));
+  const partIndex = indexOf(['part', 'partnum', 'partnumber', 'designid']);
+  const colorIdIndex = indexOf(['colorid', 'colourid', 'rebrickablecolorid', 'rbcolorid']);
+  const colorIndex = indexOf(['color', 'colour', 'colorname', 'colourname', 'couleur']);
+  const locationIndex = indexOf(['location', 'storagelocation', 'emplacement', 'case', 'bin', 'drawer']);
+  if (partIndex < 0 || colorIndex < 0 || locationIndex < 0) throw new Error('Le dernier export ne contient pas les colonnes Part, Color et Location attendues.');
+  const locations = new Map((mappings || []).map(item => [mappingIdentity(item), String(item.location || '')]));
+  let changedLocations = 0;
+  let matchedLocations = 0;
+  const output = rows.map((sourceRow, rowIndex) => {
+    const row = [...sourceRow];
+    while (row.length < rows[0].length) row.push('');
+    if (rowIndex > 0) {
+      const explicitColorId = colorIdIndex >= 0 ? String(row[colorIdIndex] || '').trim() : '';
+      const colorValue = String(row[colorIndex] || '').trim();
+      const numericColor = explicitColorId || (/^-?\d+$/.test(colorValue) ? colorValue : '');
+      const item = {
+        partNum: String(row[partIndex] || '').trim(),
+        colorId: /^-?\d+$/.test(numericColor) ? Number(numericColor) : null,
+        colorName: numericColor ? '' : colorValue
+      };
+      const key = mappingIdentity(item);
+      if (locations.has(key)) {
+        const nextLocation = locations.get(key);
+        if (String(row[locationIndex] || '').trim() !== nextLocation) changedLocations += 1;
+        row[locationIndex] = nextLocation;
+        matchedLocations += 1;
+      }
+    }
+    return row.map(csvValue).join(',');
+  });
+  return {
+    content: `${output.join('\r\n')}\r\n`,
+    rowCount: rows.length - 1,
+    matchedLocations,
+    changedLocations
+  };
 }
 
 function mappingsFromCsv(content) {
@@ -742,13 +792,13 @@ function splitColorCandidate(items, count) {
     if (!byColor.has(key)) byColor.set(key, { name: key, bucket: item._color, items: [] });
     byColor.get(key).items.push(item);
   }
-  if (shapes.size > 2 || byColor.size < count) return null;
+  if (shapes.size !== 1 || byColor.size < count) return null;
   const entries = [...byColor.values()].sort((a, b) => a.bucket.localeCompare(b.bucket, 'fr') || splitQuantity(b.items) - splitQuantity(a.items));
   const groups = Array.from({ length: count }, () => ({ entries: [], items: [], buckets: new Set() }));
   for (const entry of entries) {
     const empty = groups.filter(group => !group.entries.length);
     const candidates = empty.length >= entries.length - groups.reduce((sum, group) => sum + group.entries.length, 0) ? empty : groups;
-    const destination = [...candidates].sort((a, b) => Number(a.buckets.has(entry.bucket)) - Number(b.buckets.has(entry.bucket)) || a.entries.length - b.entries.length || splitQuantity(a.items) - splitQuantity(b.items))[0];
+    const destination = [...candidates].sort((a, b) => Number(a.buckets.has(entry.bucket)) - Number(b.buckets.has(entry.bucket)) || splitQuantity(a.items) - splitQuantity(b.items) || a.entries.length - b.entries.length)[0];
     destination.entries.push(entry);
     destination.items.push(...entry.items);
     destination.buckets.add(entry.bucket);
@@ -757,7 +807,7 @@ function splitColorCandidate(items, count) {
   return splitCandidate('color', 'palettes de couleurs contrastées', groups.map(group => ({
     label: `Couleurs : ${group.entries.map(entry => splitColorLabel(entry.name)).join(', ')}`,
     items: group.items
-  })), shapes.size === 1 ? 100 : 95, Math.max(70, 100 - repeatedBuckets * 7));
+  })), 100, Math.max(70, 100 - repeatedBuckets * 7));
 }
 
 function splitSizeCandidate(items, count) {
@@ -845,7 +895,8 @@ function splitFallbackCandidate(items, count) {
 }
 
 function compareSplitCandidates(a, b) {
-  return b.coherence - a.coherence || b.retrieval - a.retrieval || b.balance - a.balance || a.kind.localeCompare(b.kind);
+  const score = candidate => candidate.coherence * 0.55 + candidate.retrieval * 0.30 + candidate.balance * 0.15;
+  return score(b) - score(a) || b.coherence - a.coherence || b.retrieval - a.retrieval || b.balance - a.balance || a.kind.localeCompare(b.kind);
 }
 
 function splitCaseAdvice(items, groupCount, location = '', freeLocations = []) {
@@ -1273,6 +1324,28 @@ const server = http.createServer(async (req, res) => {
     const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
     return send(res, 200, { occupied: occupiedCases(mappings), empty: inferredEmptyCases(mappings) });
   }
+  if (req.method === 'GET' && req.url === '/api/storage/export-rebrickable') {
+    try {
+      const source = fs.readFileSync(LOCATION_SOURCE_CSV_PATH, 'utf8');
+      const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+      const exported = rebrickableCsvWithLocations(source, mappings);
+      const date = new Date().toISOString().slice(0, 10);
+      res.writeHead(200, {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename="rebrickable_parts_sourivore_updated_${date}.csv"`,
+        'cache-control': 'no-store',
+        'x-export-rows': String(exported.rowCount),
+        'x-export-matched': String(exported.matchedLocations),
+        'x-export-changes': String(exported.changedLocations)
+      });
+      return res.end(exported.content);
+    } catch (error) {
+      const message = error.code === 'ENOENT'
+        ? 'Resynchronisez une fois la liste Rebrickable pour préparer le fichier source complet, puis relancez l’export.'
+        : error.message;
+      return send(res, 409, { error: message });
+    }
+  }
   if (req.method === 'GET' && req.url.startsWith('/api/storage/case?')) {
     try {
       const location = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams.get('location');
@@ -1340,4 +1413,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, rebrickableCsvWithLocations, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange, networkUrls, server };

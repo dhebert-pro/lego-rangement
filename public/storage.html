@@ -12,13 +12,16 @@
   <header class="storage-hero"><a class="page-switch" href="/">Ranger un modèle</a><img class="hero-brick" src="/brick.svg" alt="Brique de construction rouge en perspective"><div class="studs"><i></i><i></i><i></i><i></i></div><p class="eyebrow">GESTION DU STOCK</p><h1>Réorganiser<br><span>mes cases.</span></h1><p>Consultez le contenu d’une case, déplacez plusieurs références et gardez la trace de chaque changement.</p></header>
   <main class="storage-main">
     <section class="storage-card lookup-card">
-      <div class="section-title"><div><p class="eyebrow">CONTENU</p><h2>Afficher une case</h2></div><div class="storage-heading-tools"><span id="occupiedCount"></span><button id="resyncLocations" type="button" class="secondary-button" disabled>Resynchroniser Rebrickable</button></div></div>
+      <div class="section-title"><div><p class="eyebrow">CONTENU</p><h2>Afficher une case</h2></div><div class="storage-heading-tools"><span id="occupiedCount"></span><button id="exportRebrickable" type="button" class="secondary-button">Exporter pour Rebrickable</button><button id="resyncLocations" type="button" class="secondary-button" disabled>Resynchroniser</button></div></div>
       <form id="caseForm" class="storage-form"><label for="caseLocation">Numéro de case</label><div><input id="caseLocation" list="occupiedCases" required placeholder="Ex. C2" autocomplete="off"><button>Afficher les pièces</button></div></form>
       <datalist id="occupiedCases"></datalist>
       <datalist id="allCases"></datalist>
       <p id="caseStatus" class="storage-status" aria-live="polite">Choisissez une case occupée.</p>
-      <div id="caseActions" class="case-actions" hidden><label><input id="selectAllParts" type="checkbox"> Tout sélectionner</label><strong id="selectionCount">0 pièce sélectionnée</strong></div>
-      <div id="caseItems" class="case-items"></div>
+      <details id="caseItemsPanel" class="case-items-panel" hidden>
+        <summary><span>Voir et sélectionner les pièces de la case</span><b id="casePanelCount"></b></summary>
+        <div id="caseActions" class="case-actions" hidden><label><input id="selectAllParts" type="checkbox"> Tout sélectionner</label><strong id="selectionCount">0 pièce sélectionnée</strong></div>
+        <div id="caseItems" class="case-items"></div>
+      </details>
       <div id="adviceActions" class="advice-actions" hidden>
         <div><strong>Cette case est trop pleine ?</strong><span>Obtenez une répartition conseillée sans déplacer les pièces.</span></div>
         <button type="button" data-advice-groups="2">Conseiller une division en 2</button>
@@ -28,18 +31,15 @@
       <form id="moveForm" class="move-bar" hidden><div><strong>Déplacer la sélection</strong><span id="moveSummary"></span></div><label for="targetLocation">Nouvelle case</label><input id="targetLocation" list="allCases" required placeholder="Ex. D4" autocomplete="off"><button>Changer la case</button></form>
     </section>
 
-    <section class="storage-card empty-card">
-      <div class="section-title"><div><p class="eyebrow">DISPONIBILITÉ</p><h2>Cases vides</h2></div><span id="emptyCount">0</span></div>
-      <p class="section-help">Cette liste est calculée automatiquement à partir des numéros de cases utilisés. Elle se met à jour après chaque déplacement ou restauration.</p>
-      <div id="emptyCasesList" class="empty-case-list"></div>
-    </section>
+    <details class="storage-card collapsible-card empty-card">
+      <summary><div><p class="eyebrow">DISPONIBILITÉ</p><h2>Cases vides</h2></div><span id="emptyCount">0</span></summary>
+      <div class="collapsible-card-content"><p class="section-help">Cette liste est calculée automatiquement à partir des numéros de cases utilisés. Elle se met à jour après chaque déplacement ou restauration.</p><div id="emptyCasesList" class="empty-case-list"></div></div>
+    </details>
 
-    <section class="storage-card history-card">
-      <div class="section-title"><div><p class="eyebrow">MÉMOIRE</p><h2>Pièces déplacées</h2></div><button id="clearHistory" type="button" class="danger-button">Vider l’historique</button></div>
-      <p class="section-help">Une pièce déplacée plusieurs fois n’apparaît qu’une fois, de sa case d’origine à sa case actuelle. Vider l’historique restaure toutes les pièces dans leur emplacement d’origine.</p>
-      <div id="moveHistory" class="move-history"></div>
-      <p id="historyStatus" class="storage-status" aria-live="polite"></p>
-    </section>
+    <details class="storage-card collapsible-card history-card">
+      <summary><div><p class="eyebrow">MÉMOIRE</p><h2>Pièces déplacées</h2></div><span id="historyCount">0</span></summary>
+      <div class="collapsible-card-content"><div class="history-tools"><p class="section-help">Une pièce déplacée plusieurs fois n’apparaît qu’une fois, de sa case d’origine à sa case actuelle.</p><button id="clearHistory" type="button" class="danger-button">Vider l’historique</button></div><div id="moveHistory" class="move-history"></div><p id="historyStatus" class="storage-status" aria-live="polite"></p></div>
+    </details>
   </main>
   <footer>Données fournies par Rebrickable · LEGO® est une marque du groupe LEGO.</footer>
   <script src="/image-preview.js"></script>

@@ -1,6 +1,7 @@
 const caseForm = document.querySelector('#caseForm');
 const caseLocation = document.querySelector('#caseLocation');
 const caseItems = document.querySelector('#caseItems');
+const caseItemsPanel = document.querySelector('#caseItemsPanel');
 const caseStatus = document.querySelector('#caseStatus');
 const caseActions = document.querySelector('#caseActions');
 const adviceActions = document.querySelector('#adviceActions');
@@ -73,6 +74,8 @@ function renderCaseItems() {
     <b class="storage-quantity">${item.quantity == null ? 'Qté ?' : `× ${item.quantity}`}</b>
   </label>`).join('') : '<p class="empty-message">Cette case ne contient aucune pièce connue.</p>';
   caseActions.hidden = !currentItems.length;
+  caseItemsPanel.hidden = !currentItems.length;
+  document.querySelector('#casePanelCount').textContent = `${currentItems.length} réf.`;
   adviceActions.hidden = currentItems.length < 2;
   adviceActions.querySelector('[data-advice-groups="3"]').disabled = currentItems.length < 3;
   moveForm.hidden = true;
@@ -86,6 +89,7 @@ async function loadCase(location) {
   if (!requested) return;
   caseStatus.textContent = 'Chargement des pièces et de leurs images…';
   caseItems.innerHTML = '';
+  caseItemsPanel.hidden = true;
   splitAdvice.innerHTML = '';
   currentAdvice = null;
   adviceActions.hidden = true;
@@ -99,6 +103,7 @@ async function loadCase(location) {
     const quantity = currentItems.reduce((total, item) => total + (Number(item.quantity) || 0), 0);
     caseStatus.textContent = `${currentItems.length} référence${currentItems.length === 1 ? '' : 's'}${quantity ? ` · ${quantity} pièce${quantity === 1 ? '' : 's'} au total` : ''}.`;
     renderCaseItems();
+    caseItemsPanel.open = !window.matchMedia('(max-width: 700px)').matches;
   } catch (error) {
     currentCase = requested;
     currentItems = [];
@@ -115,13 +120,33 @@ function renderSplitAdvice(data) {
       <h4>${escapeHtml(group.label)}</h4>
       <div class="advice-metrics"><b>${group.referenceCount} réf.</b><b>${group.quantity} pièces</b><b>${group.estimatedSharePercent}% des pièces</b></div>
       <ul>${group.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>
-      <div class="advice-move"><label>Case destination<input data-advice-target="${group.index}" list="allCases" value="${escapeHtml(group.suggestedLocation)}" autocomplete="off"></label><button type="button" data-move-advice-group="${group.index}">Déplacer ce groupe</button></div>
-      <div class="advice-parts">${group.items.map(item => `<div class="advice-part">
+      <div class="advice-move"><label>Case destination<input data-advice-target="${group.index}" list="allCases" value="${escapeHtml(group.suggestedLocation)}" autocomplete="off"></label><button type="button" data-move-advice-group="${group.index}">Déplacer la sélection</button></div>
+      <details class="advice-parts-panel"><summary><span>Choisir les pièces</span><b><span data-advice-selected-count="${group.index}">${group.items.length}</span> / ${group.items.length}</b></summary>
+      <label class="advice-select-all"><input type="checkbox" data-advice-select-all="${group.index}" checked> Tout sélectionner dans ce groupe</label>
+      <div class="advice-parts">${group.items.map((item, itemIndex) => `<label class="advice-part">
+        <input class="advice-part-check" type="checkbox" data-advice-part-group="${group.index}" data-advice-part-index="${itemIndex}" checked aria-label="Sélectionner ${escapeHtml(item.name)} en ${escapeHtml(item.colorName)}">
         <span class="advice-thumb">${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" data-preview alt="Agrandir ${escapeHtml(item.name)}">` : '◫'}</span>
         <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.colorName || 'Couleur inconnue')} · ${escapeHtml(item.partNum)}</small></span>
         <b>${item.quantity == null ? 'Qté ?' : `× ${item.quantity}`}</b>
-      </div>`).join('')}</div>
+      </label>`).join('')}</div></details>
     </article>`).join('')}</div><div class="apply-advice"><button type="button" data-apply-advice>Appliquer tout le découpage</button><span>Les déplacements seront ajoutés à l’historique.</span></div>`;
+}
+
+function updateAdviceSelection(groupIndex) {
+  const inputs = [...splitAdvice.querySelectorAll(`[data-advice-part-group="${groupIndex}"]`)];
+  const selected = inputs.filter(input => input.checked).length;
+  const selectAll = splitAdvice.querySelector(`[data-advice-select-all="${groupIndex}"]`);
+  const count = splitAdvice.querySelector(`[data-advice-selected-count="${groupIndex}"]`);
+  const moveButton = splitAdvice.querySelector(`[data-move-advice-group="${groupIndex}"]`);
+  if (selectAll) {
+    selectAll.checked = Boolean(inputs.length) && selected === inputs.length;
+    selectAll.indeterminate = selected > 0 && selected < inputs.length;
+  }
+  if (count) count.textContent = selected;
+  if (moveButton) {
+    moveButton.disabled = selected === 0;
+    moveButton.textContent = selected ? `Déplacer ${selected} réf.` : 'Aucune pièce sélectionnée';
+  }
 }
 
 adviceActions.addEventListener('click', async event => {
@@ -158,9 +183,13 @@ splitAdvice.addEventListener('click', async event => {
     let result;
     if (groupButton) {
       const group = groups.find(item => item.index === Number(groupButton.dataset.moveAdviceGroup));
+      const selectedItems = [...splitAdvice.querySelectorAll(`[data-advice-part-group="${group.index}"]:checked`)]
+        .map(input => group.items[Number(input.dataset.advicePartIndex)])
+        .filter(Boolean);
       if (!group?.toLocation) throw new Error('Indiquez une case de destination.');
+      if (!selectedItems.length) throw new Error('Sélectionnez au moins une pièce dans ce groupe.');
       if (group.toLocation.toLocaleLowerCase('fr') === currentCase.toLocaleLowerCase('fr')) throw new Error('Choisissez une autre case pour déplacer ce groupe.');
-      result = await request('/api/storage/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fromLocation: currentCase, toLocation: group.toLocation, items: group.items }) });
+      result = await request('/api/storage/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fromLocation: currentCase, toLocation: group.toLocation, items: selectedItems }) });
     } else {
       result = await request('/api/storage/split', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fromLocation: currentCase, groups: groups.map(group => ({ toLocation: group.toLocation, items: group.items })) }) });
     }
@@ -173,6 +202,15 @@ splitAdvice.addEventListener('click', async event => {
     button.disabled = false;
     button.textContent = originalText;
   }
+});
+
+splitAdvice.addEventListener('change', event => {
+  if (event.target.matches('[data-advice-select-all]')) {
+    const groupIndex = Number(event.target.dataset.adviceSelectAll);
+    splitAdvice.querySelectorAll(`[data-advice-part-group="${groupIndex}"]`).forEach(input => { input.checked = event.target.checked; });
+    updateAdviceSelection(groupIndex);
+  }
+  if (event.target.matches('[data-advice-part-group]')) updateAdviceSelection(Number(event.target.dataset.advicePartGroup));
 });
 
 function renderCaseLists() {
@@ -199,6 +237,7 @@ function renderHistory(moves) {
     <div class="history-route"><b>${escapeHtml(move.originalLocation || move.fromLocation)}</b><span>→</span><b>${escapeHtml(move.currentLocation || move.toLocation)}</b></div>
   </article>`).join('') : '<p class="empty-message">Aucune pièce déplacée depuis le dernier effacement.</p>';
   document.querySelector('#clearHistory').disabled = !moves.length;
+  document.querySelector('#historyCount').textContent = moves.length;
 }
 
 async function loadHistory() {
@@ -255,7 +294,42 @@ document.querySelector('#resyncLocations').addEventListener('click', async event
     caseStatus.textContent = error.message;
   } finally {
     button.disabled = !extensionReady;
-    button.textContent = 'Resynchroniser Rebrickable';
+    button.textContent = 'Resynchroniser';
+  }
+});
+
+document.querySelector('#exportRebrickable').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Préparation…';
+  caseStatus.textContent = 'Préparation du fichier complet avec les emplacements actuels…';
+  try {
+    const response = await fetch('/api/storage/export-rebrickable');
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Export Rebrickable impossible.');
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') || '';
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const simpleName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    const filename = encodedName ? decodeURIComponent(encodedName) : (simpleName || 'rebrickable_parts_updated.csv');
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    const rows = Number(response.headers.get('x-export-rows')) || 0;
+    const changed = Number(response.headers.get('x-export-changes')) || 0;
+    caseStatus.textContent = `CSV Rebrickable prêt : ${rows} lignes conservées, ${changed} emplacement${changed === 1 ? '' : 's'} modifié${changed === 1 ? '' : 's'}.`;
+  } catch (error) {
+    caseStatus.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
   }
 });
 

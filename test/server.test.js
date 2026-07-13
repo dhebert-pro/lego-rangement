@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, rebrickableCsvWithLocations, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -10,6 +10,19 @@ test('reconnaît un lien de MOC avec son slug', () => assert.deepEqual(cleanMode
 test('interprète la colonne Color Rebrickable comme un identifiant numérique', () => {
   const [part] = mappingsFromCsv('Part,Color,Quantity,Notes,Location,IsUsed\n3707,0,8,,C2,False\n');
   assert.deepEqual(part, { partNum: '3707', colorId: 0, colorName: '', quantity: 8, location: 'C2' });
+});
+test('prépare un CSV Rebrickable complet en ne modifiant que les emplacements', () => {
+  const source = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,"note, conservée",A1,False,False\n3002,1,7,,B1,True,False\n3003,2,3,,,False,False\n';
+  const result = rebrickableCsvWithLocations(source, [
+    { partNum: '3001', colorId: 4, location: 'C2' },
+    { partNum: '3002', colorId: 1, location: 'B1' }
+  ]);
+  assert.equal(result.rowCount, 3);
+  assert.equal(result.matchedLocations, 2);
+  assert.equal(result.changedLocations, 1);
+  assert.match(result.content, /3001,4,12,"note, conservée",C2,False,False/);
+  assert.match(result.content, /3002,1,7,,B1,True,False/);
+  assert.match(result.content, /3003,2,3,,,False,False/);
 });
 test('regroupe toutes les références par case occupée', () => {
   const cases = occupiedCases([
@@ -112,6 +125,28 @@ test('sépare les couleurs proches quand une case contient une seule forme', () 
   assert.notEqual(groupForColor('Black'), groupForColor('Dark Bluish Gray'));
   assert.notEqual(groupForColor('White'), groupForColor('Light Bluish Gray'));
   assert.ok(advice.groups.every(group => group.label.startsWith('Couleurs : ')));
+});
+test('ne découpe jamais par couleur lorsque les formes sont différentes', () => {
+  const items = [
+    { partNum: '3001', name: 'Brick 2 x 4', colorName: 'Red', quantity: 10 },
+    { partNum: '3001', name: 'Brick 2 x 4', colorName: 'Blue', quantity: 10 },
+    { partNum: '3020', name: 'Plate 2 x 4', colorName: 'Red', quantity: 10 },
+    { partNum: '3020', name: 'Plate 2 x 4', colorName: 'Blue', quantity: 10 }
+  ];
+  assert.notEqual(splitCaseAdvice(items, 2, 'A1', ['A2']).criterion, 'palettes de couleurs contrastées');
+});
+test('préfère un autre critère cohérent lorsqu’il évite un déséquilibre grotesque', () => {
+  const physical = dimensionsCm => ({ dimensionsCm, volumeCm3: dimensionsCm.reduce((product, value) => product * value, 1) });
+  const items = [
+    { partNum: 'animal1', name: 'Animal Tail', colorName: 'Red', quantity: 1, physical: physical([.8, .8, .8]) },
+    { partNum: 'technic1', name: 'Technic Pin', colorName: 'Black', quantity: 49, physical: physical([.8, .8, .8]) },
+    { partNum: 'wheel1', name: 'Wheel Large', colorName: 'Black', quantity: 1, physical: physical([2.4, .8, 2.4]) },
+    { partNum: 'brick1', name: 'Brick Special', colorName: 'Blue', quantity: 49, physical: physical([2.4, .8, 2.4]) },
+    { partNum: 'plate1', name: 'Plate Special', colorName: 'White', quantity: 50, physical: physical([4.8, .8, 4.8]) }
+  ];
+  const advice = splitCaseAdvice(items, 3, 'A1', ['A2', 'A3']);
+  assert.equal(advice.criterion, 'gabarit au sol en tenons');
+  assert.ok(Math.max(...advice.groups.map(group => group.estimatedSharePercent)) <= 34);
 });
 test('peut nommer les groupes par leur gabarit plutôt que par leur quantité', () => {
   const items = [
