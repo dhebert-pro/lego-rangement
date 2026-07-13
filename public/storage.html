@@ -19,6 +19,12 @@
       <p id="caseStatus" class="storage-status" aria-live="polite">Choisissez une case occupée.</p>
       <div id="caseActions" class="case-actions" hidden><label><input id="selectAllParts" type="checkbox"> Tout sélectionner</label><strong id="selectionCount">0 pièce sélectionnée</strong></div>
       <div id="caseItems" class="case-items"></div>
+      <div id="adviceActions" class="advice-actions" hidden>
+        <div><strong>Cette case est trop pleine ?</strong><span>Obtenez une répartition conseillée sans déplacer les pièces.</span></div>
+        <button type="button" data-advice-groups="2">Conseiller une division en 2</button>
+        <button type="button" data-advice-groups="3">Conseiller une division en 3</button>
+      </div>
+      <section id="splitAdvice" class="split-advice" aria-live="polite"></section>
       <form id="moveForm" class="move-bar" hidden><div><strong>Déplacer la sélection</strong><span id="moveSummary"></span></div><label for="targetLocation">Nouvelle case</label><input id="targetLocation" list="allCases" required placeholder="Ex. D4" autocomplete="off"><button>Changer la case</button></form>
     </section>
 

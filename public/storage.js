@@ -3,6 +3,8 @@ const caseLocation = document.querySelector('#caseLocation');
 const caseItems = document.querySelector('#caseItems');
 const caseStatus = document.querySelector('#caseStatus');
 const caseActions = document.querySelector('#caseActions');
+const adviceActions = document.querySelector('#adviceActions');
+const splitAdvice = document.querySelector('#splitAdvice');
 const moveForm = document.querySelector('#moveForm');
 const targetLocation = document.querySelector('#targetLocation');
 const selectAllParts = document.querySelector('#selectAllParts');
@@ -38,6 +40,8 @@ function renderCaseItems() {
     <b class="storage-quantity">${item.quantity == null ? 'Qté ?' : `× ${item.quantity}`}</b>
   </label>`).join('') : '<p class="empty-message">Cette case ne contient aucune pièce connue.</p>';
   caseActions.hidden = !currentItems.length;
+  adviceActions.hidden = currentItems.length < 2;
+  adviceActions.querySelector('[data-advice-groups="3"]').disabled = currentItems.length < 3;
   moveForm.hidden = true;
   selectAllParts.checked = false;
   selectAllParts.indeterminate = false;
@@ -49,6 +53,8 @@ async function loadCase(location) {
   if (!requested) return;
   caseStatus.textContent = 'Chargement des pièces et de leurs images…';
   caseItems.innerHTML = '';
+  splitAdvice.innerHTML = '';
+  adviceActions.hidden = true;
   caseActions.hidden = true;
   moveForm.hidden = true;
   try {
@@ -66,6 +72,37 @@ async function loadCase(location) {
     renderCaseItems();
   }
 }
+
+function renderSplitAdvice(data) {
+  splitAdvice.innerHTML = `<div class="advice-heading"><div><p class="eyebrow">CONSEIL DE RÉPARTITION</p><h3>Scinder la case ${escapeHtml(data.location)} en ${data.groupCount}</h3></div><p>${escapeHtml(data.method)}</p></div>
+    <div class="advice-groups" style="--advice-columns:${data.groupCount}">${data.groups.map(group => `<article class="advice-group">
+      <header><span>Groupe ${group.index}</span><strong>${group.suggestedLocation ? `Case ${escapeHtml(group.suggestedLocation)}` : 'Case libre à choisir'}</strong></header>
+      <div class="advice-metrics"><b>${group.referenceCount} réf.</b><b>${group.quantity} pièces</b><b>≈ ${group.estimatedSharePercent}% du volume</b></div>
+      <ul>${group.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>
+      <div class="advice-parts">${group.items.map(item => `<div class="advice-part">
+        <span class="advice-thumb">${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" data-preview alt="Agrandir ${escapeHtml(item.name)}">` : '◫'}</span>
+        <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.colorName || 'Couleur inconnue')} · ${escapeHtml(item.partNum)}</small></span>
+        <b>${item.quantity == null ? 'Qté ?' : `× ${item.quantity}`}</b>
+      </div>`).join('')}</div>
+    </article>`).join('')}</div>`;
+}
+
+adviceActions.addEventListener('click', async event => {
+  const button = event.target.closest('[data-advice-groups]');
+  if (!button || button.disabled) return;
+  const groups = Number(button.dataset.adviceGroups);
+  adviceActions.querySelectorAll('button').forEach(item => { item.disabled = true; });
+  splitAdvice.innerHTML = '<p class="advice-loading">Analyse des formes, dimensions, couleurs et quantités…</p>';
+  try {
+    renderSplitAdvice(await request(`/api/storage/advice?location=${encodeURIComponent(currentCase)}&groups=${groups}`));
+    splitAdvice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (error) {
+    splitAdvice.innerHTML = `<p class="advice-error">${escapeHtml(error.message)}</p>`;
+  } finally {
+    adviceActions.querySelector('[data-advice-groups="2"]').disabled = currentItems.length < 2;
+    adviceActions.querySelector('[data-advice-groups="3"]').disabled = currentItems.length < 3;
+  }
+});
 
 function renderCaseLists() {
   document.querySelector('#occupiedCount').textContent = `${occupiedCases.length} cases occupées`;

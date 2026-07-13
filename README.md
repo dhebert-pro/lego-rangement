@@ -26,7 +26,9 @@ La page **Gérer les cases** (`/storage.html`) affiche toutes les références p
 
 Les déplacements sont enregistrés sur le serveur du PC et sont donc partagés avec le téléphone. Une pièce déplacée plusieurs fois ne conserve qu’un trajet entre sa case d’origine et sa case actuelle. Le bouton **Vider l’historique** restaure toutes ces pièces dans leur case d’origine avant d’effacer le journal.
 
-Les cases libres sont calculées dans le référentiel fixe des rangements existants : `1` à `3`, puis `A1` à `A9` jusqu’à `AF1` à `AF9`. Elles sont recalculées après chaque déplacement ou restauration. Les images exactes de chaque couleur sont chargées progressivement puis mises en cache localement.
+Les cases libres sont calculées dans le référentiel fixe des rangements existants : `1` à `3`, puis `A1` à `A9` jusqu’à `AB1` à `AB9`. Elles sont recalculées après chaque déplacement ou restauration. Les images exactes de chaque couleur sont chargées progressivement puis mises en cache localement.
+
+Depuis le contenu d’une case, deux boutons proposent une division en 2 ou en 3. Le conseil privilégie la cohérence visuelle et d’usage, sépare les formes faciles à confondre, puis équilibre le volume estimé à partir des dimensions LDraw et des quantités. Il ne déplace aucune pièce automatiquement : les cases libres proposées restent des suggestions.
 
 Les miniatures des deux pages s’agrandissent au survol sur ordinateur et au toucher sur téléphone.
 

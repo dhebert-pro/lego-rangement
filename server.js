@@ -456,7 +456,7 @@ function occupiedCases(mappings) {
 }
 
 function storageCaseUniverse() {
-  const prefixes = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'ABCDEF'].map((letter, index) => index < 26 ? letter : `A${letter}`);
+  const prefixes = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'AB'].map((letter, index) => index < 26 ? letter : `A${letter}`);
   return ['1', '2', '3', ...prefixes.flatMap(prefix => Array.from({ length: 9 }, (_, index) => `${prefix}${index + 1}`))];
 }
 
@@ -520,6 +520,7 @@ async function storageCase(location) {
     location: matches[0]?.location || requested,
     items: matches.map(mapping => {
       const detail = exact.get(mappingIdentity(mapping)) || byPart.get(mapping.partNum) || {};
+      const dimensionsCm = dimensionsCatalog()[String(mapping.partNum || '').toLowerCase().replace(/\.dat$/, '')] || null;
       return {
         partNum: mapping.partNum,
         colorId: mapping.colorId,
@@ -527,9 +528,180 @@ async function storageCase(location) {
         name: detail.name || mapping.partNum,
         imageUrl: mapping.colorId == null ? detail.imageUrl || '' : `/api/storage/image?partNum=${encodeURIComponent(mapping.partNum)}&colorId=${encodeURIComponent(mapping.colorId)}`,
         quantity: mapping.quantity ?? detail.quantity ?? null,
+        physical: dimensionsCm ? { dimensionsCm, volumeCm3: Number(dimensionsCm.reduce((product, value) => product * value, 1).toFixed(3)) } : null,
         bricklinkUrl: detail.bricklinkId ? `https://www.bricklink.com/v2/catalog/catalogitem.page?P=${encodeURIComponent(detail.bricklinkId)}` : ''
       };
     }).sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }))
+  };
+}
+
+function splitFamily(name) {
+  const value = String(name || '').toLocaleLowerCase('en').normalize('NFD').replace(/[\u0300-\u036f]/g, ' ');
+  const rules = [
+    [/technic|axle|pin\b|liftarm|gear|rack|connector|bionicle/, 'Technic, axes et connecteurs'],
+    [/clip|bar\b|handle|hinge|joint|arm\b|lever|hook|towball|droid/, 'Clips, barres et articulations'],
+    [/wheel|tire|tyre|rim|hub|mudguard|track/, 'Roues et éléments roulants'],
+    [/minifig|torso|head\b|hair|helmet|weapon|sword|gun\b|shield|leg\b|cape/, 'Minifigurines et accessoires'],
+    [/window|door|windscreen|panel|fence|gate/, 'Panneaux, portes et fenêtres'],
+    [/slope|wedge|arch|curve|curved|bow\b/, 'Pentes et formes courbes'],
+    [/tile|macaroni|grille|grill/, 'Tuiles et surfaces lisses'],
+    [/plate/, 'Plaques'],
+    [/brick/, 'Briques'],
+    [/cone|cylinder|dish|round|wheel|ball|sphere/, 'Pièces rondes et cylindriques'],
+    [/plant|flower|leaf|animal|bird|dragon|food/, 'Décor, végétaux et animaux']
+  ];
+  return rules.find(([pattern]) => pattern.test(value))?.[1] || 'Formes spéciales et autres pièces';
+}
+
+function splitShapeKey(partNum) {
+  return String(partNum || '').toLocaleLowerCase('fr').replace(/pr\d.*$/i, '').replace(/[a-z]$/i, '');
+}
+
+function splitSizeBand(physical) {
+  const dimensions = physical?.dimensionsCm?.map(Number).filter(Number.isFinite) || [];
+  const longest = dimensions.length ? Math.max(...dimensions) : 0;
+  const volume = Number(physical?.volumeCm3) || 0;
+  if (!longest && !volume) return 'taille inconnue';
+  if (longest >= 8) return 'très longues ou grandes';
+  if (longest >= 4 || volume >= 16) return 'grandes';
+  if (longest >= 2 || volume >= 3) return 'moyennes';
+  return 'petites';
+}
+
+function splitColorBucket(colorName) {
+  const value = String(colorName || '').toLocaleLowerCase('en');
+  if (/black|dark bluish gray|dark gray|gun metal/.test(value)) return 'sombres neutres';
+  if (/white|light bluish gray|light gray|silver|pearl/.test(value)) return 'claires neutres';
+  if (/red|coral|magenta|pink/.test(value)) return 'rouges et roses';
+  if (/orange|yellow|tan|gold/.test(value)) return 'jaunes et orangées';
+  if (/green|olive|lime/.test(value)) return 'vertes';
+  if (/blue|azure|cyan/.test(value)) return 'bleues';
+  if (/brown|nougat/.test(value)) return 'brunes';
+  if (/purple|lavender|violet/.test(value)) return 'violettes';
+  if (/trans|clear/.test(value)) return 'transparentes';
+  return value || 'couleur inconnue';
+}
+
+function splitItemWeight(item) {
+  const quantity = Math.max(1, Number(item.quantity) || 1);
+  const measuredVolume = Number(item.physical?.volumeCm3);
+  const unitVolume = Number.isFinite(measuredVolume) && measuredVolume > 0 ? Math.min(80, Math.max(0.08, measuredVolume)) : 1;
+  return quantity * unitVolume;
+}
+
+function splitCaseAdvice(items, groupCount, location = '', freeLocations = []) {
+  const count = Number(groupCount);
+  if (![2, 3].includes(count)) throw new Error('Choisissez une division en 2 ou en 3.');
+  if (!Array.isArray(items) || items.length < count) throw new Error(`Cette case doit contenir au moins ${count} références pour être divisée en ${count}.`);
+
+  const annotated = items.map((item, index) => ({
+    ...item,
+    _index: index,
+    _family: splitFamily(item.name),
+    _shape: splitShapeKey(item.partNum),
+    _size: splitSizeBand(item.physical),
+    _color: splitColorBucket(item.colorName),
+    _weight: splitItemWeight(item)
+  }));
+  const byShape = new Map();
+  for (const item of annotated) {
+    const key = `${item._family}|${item._shape}`;
+    if (!byShape.has(key)) byShape.set(key, { family: item._family, shape: item._shape, items: [], weight: 0, sizes: new Set(), colors: new Set() });
+    const block = byShape.get(key);
+    block.items.push(item);
+    block.weight += item._weight;
+    block.sizes.add(item._size);
+    block.colors.add(item._color);
+  }
+  let blocks = [...byShape.values()];
+  if (blocks.length < count) {
+    blocks = annotated.map(item => ({ family: item._family, shape: item._shape, items: [item], weight: item._weight, sizes: new Set([item._size]), colors: new Set([item._color]) }));
+  }
+  blocks.sort((a, b) => b.weight - a.weight || b.items.length - a.items.length || a.shape.localeCompare(b.shape, 'fr', { numeric: true }));
+
+  const totalWeight = blocks.reduce((sum, block) => sum + block.weight, 0);
+  const targetWeight = totalWeight / count || 1;
+  const groups = Array.from({ length: count }, (_, index) => ({ index, blocks: [], weight: 0, families: new Set(), sizes: new Set(), colors: new Set() }));
+  for (const block of blocks) {
+    const emptyGroups = groups.filter(group => !group.blocks.length);
+    const remainingBlocks = blocks.length - groups.reduce((sum, group) => sum + group.blocks.length, 0);
+    const candidates = emptyGroups.length >= remainingBlocks ? emptyGroups : groups;
+    const ranked = candidates.map(group => {
+      const projected = group.weight + block.weight;
+      const balance = Math.abs(projected - targetWeight) / targetWeight;
+      const overfill = Math.max(0, projected - targetWeight * 1.15) / targetWeight * 8;
+      const family = !group.blocks.length ? 0 : group.families.has(block.family) ? -0.45 : 0.24;
+      const sizeOverlap = [...block.sizes].some(size => group.sizes.has(size)) ? -0.12 : 0.05;
+      const confusingColors = [...block.colors].filter(color => group.colors.has(color)).length * 0.13;
+      return { group, score: balance + overfill + family + sizeOverlap + confusingColors };
+    }).sort((a, b) => a.score - b.score || a.group.weight - b.group.weight || a.group.index - b.group.index);
+    const destination = ranked[0].group;
+    destination.blocks.push(block);
+    destination.weight += block.weight;
+    destination.families.add(block.family);
+    block.sizes.forEach(size => destination.sizes.add(size));
+    block.colors.forEach(color => destination.colors.add(color));
+  }
+
+  // A final pass corrects a lopsided result without ever separating color variants
+  // of the same shape. It prefers moving a block into a group that already uses
+  // the same family, so physical balance does not erase visual coherence.
+  for (let iteration = 0; iteration < blocks.length * 2; iteration += 1) {
+    const ordered = [...groups].sort((a, b) => b.weight - a.weight);
+    const heavy = ordered[0];
+    const light = ordered[ordered.length - 1];
+    const currentGap = heavy.weight - light.weight;
+    const movable = heavy.blocks.filter(() => heavy.blocks.length > 1).map(block => {
+      const nextGap = Math.abs((heavy.weight - block.weight) - (light.weight + block.weight));
+      const familyPenalty = light.families.has(block.family) ? -targetWeight * 0.08 : targetWeight * 0.04;
+      return { block, score: nextGap + familyPenalty, nextGap };
+    }).filter(candidate => candidate.nextGap < currentGap);
+    movable.sort((a, b) => a.score - b.score || a.block.weight - b.block.weight);
+    if (!movable.length) break;
+    const block = movable[0].block;
+    heavy.blocks.splice(heavy.blocks.indexOf(block), 1);
+    light.blocks.push(block);
+    heavy.weight -= block.weight;
+    light.weight += block.weight;
+    for (const group of [heavy, light]) {
+      group.families = new Set(group.blocks.map(item => item.family));
+      group.sizes = new Set(group.blocks.flatMap(item => [...item.sizes]));
+      group.colors = new Set(group.blocks.flatMap(item => [...item.colors]));
+    }
+  }
+
+  const suggestedLocations = [String(location || ''), ...freeLocations.map(item => typeof item === 'string' ? item : item.location).filter(Boolean)];
+  const cleanItem = item => {
+    const { _index, _family, _shape, _size, _color, _weight, ...original } = item;
+    return original;
+  };
+  const resultGroups = groups.map((group, index) => {
+    const groupItems = group.blocks.flatMap(block => block.items).sort((a, b) => a._family.localeCompare(b._family, 'fr') || a.name.localeCompare(b.name, 'fr', { numeric: true }));
+    const quantity = groupItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    const measuredCount = groupItems.filter(item => item.physical?.volumeCm3).length;
+    const preservedShapes = group.blocks.filter(block => block.items.length > 1).length;
+    const families = [...group.families];
+    const reasons = [
+      families.length === 1 ? `Une famille principale : ${families[0]}.` : `Familles visuelles : ${families.slice(0, 3).join(', ')}.`,
+      preservedShapes ? `${preservedShapes} forme${preservedShapes === 1 ? '' : 's'} avec plusieurs couleurs conservée${preservedShapes === 1 ? '' : 's'} ensemble.` : 'Formes distinctes séparées autant que possible.',
+      measuredCount ? `Équilibre calculé avec les dimensions de ${measuredCount}/${groupItems.length} références.` : 'Équilibre estimé avec les quantités (dimensions indisponibles).'
+    ];
+    return {
+      index: index + 1,
+      suggestedLocation: suggestedLocations[index] || '',
+      referenceCount: groupItems.length,
+      quantity,
+      estimatedSharePercent: Math.round(group.weight / totalWeight * 100),
+      families,
+      reasons,
+      items: groupItems.map(cleanItem)
+    };
+  });
+  return {
+    location: String(location || ''),
+    groupCount: count,
+    method: 'Cohérence de forme et d’usage, facilité de distinction, puis équilibre du volume et des quantités.',
+    groups: resultGroups
   };
 }
 
@@ -897,6 +1069,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await storageCase(location));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
+  if (req.method === 'GET' && req.url.startsWith('/api/storage/advice?')) {
+    try {
+      const query = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams;
+      const data = await storageCase(query.get('location'));
+      const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+      return send(res, 200, splitCaseAdvice(data.items, Number(query.get('groups')), data.location, inferredEmptyCases(mappings)));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
   if (req.method === 'GET' && req.url.startsWith('/api/storage/image?')) {
     try {
       const query = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams;
@@ -944,4 +1124,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, splitCaseAdvice, completedWithChange, networkUrls, server };

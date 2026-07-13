@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -36,11 +36,30 @@ test('déplace plusieurs références et détecte une case vidée', () => {
 });
 test('déduit les cases libres dans les séries de rangement', () => {
   const universe = storageCaseUniverse();
-  assert.equal(universe.length, 291);
+  assert.equal(universe.length, 255);
   assert.deepEqual(universe.slice(0, 5), ['1', '2', '3', 'A1', 'A2']);
-  assert.deepEqual(universe.slice(-3), ['AF7', 'AF8', 'AF9']);
-  const occupied = universe.filter(location => !['2', 'A2', 'AF9'].includes(location)).map((location, index) => ({ partNum: String(index), colorId: 1, location }));
-  assert.deepEqual(inferredEmptyCases(occupied).map(item => item.location), ['2', 'A2', 'AF9']);
+  assert.deepEqual(universe.slice(-3), ['AB7', 'AB8', 'AB9']);
+  const occupied = universe.filter(location => !['2', 'A2', 'AB9'].includes(location)).map((location, index) => ({ partNum: String(index), colorId: 1, location }));
+  assert.deepEqual(inferredEmptyCases(occupied).map(item => item.location), ['2', 'A2', 'AB9']);
+});
+test('conseille une division cohérente sans perdre de référence', () => {
+  const physical = dimensionsCm => ({ dimensionsCm, volumeCm3: dimensionsCm.reduce((product, value) => product * value, 1) });
+  const items = [
+    { partNum: '3001', name: 'Brick 2 x 4', colorName: 'Red', quantity: 8, physical: physical([3.2, 1.6, .96]) },
+    { partNum: '3001', name: 'Brick 2 x 4', colorName: 'Blue', quantity: 5, physical: physical([3.2, 1.6, .96]) },
+    { partNum: '3002', name: 'Brick 2 x 3', colorName: 'Dark Red', quantity: 9, physical: physical([2.4, 1.6, .96]) },
+    { partNum: '3707', name: 'Technic Axle 8', colorName: 'Black', quantity: 12, physical: physical([6.4, .3, .3]) },
+    { partNum: '2780', name: 'Technic Pin', colorName: 'Black', quantity: 30, physical: physical([1.6, .5, .5]) },
+    { partNum: '3069b', name: 'Tile 1 x 2', colorName: 'Light Bluish Gray', quantity: 20, physical: physical([1.6, .8, .32]) }
+  ];
+  const advice = splitCaseAdvice(items, 3, 'C2', ['D1', 'D2']);
+  assert.equal(advice.groups.length, 3);
+  assert.deepEqual(advice.groups.map(group => group.suggestedLocation), ['C2', 'D1', 'D2']);
+  assert.equal(advice.groups.flatMap(group => group.items).length, items.length);
+  assert.equal(advice.groups.reduce((sum, group) => sum + group.quantity, 0), 84);
+  assert.ok(advice.groups.every(group => group.referenceCount > 0));
+  const brickGroups = advice.groups.flatMap((group, groupIndex) => group.items.filter(item => item.partNum === '3001').map(() => groupIndex));
+  assert.equal(new Set(brickGroups).size, 1);
 });
 test('conserve uniquement le trajet entre la première et la dernière case', () => {
   const first = consolidateMoveHistory([], [{ partNum: '3001', colorId: 1, fromLocation: 'A1', toLocation: 'B1' }]);
