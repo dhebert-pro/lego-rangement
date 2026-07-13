@@ -378,6 +378,112 @@ function rebrickableCsvWithLocations(content, mappings) {
   };
 }
 
+function rebrickableTable(content, label) {
+  const rows = parseCsv(String(content || ''));
+  if (rows.length < 2) throw new Error(`L’export ${label} est vide.`);
+  const rawHeaders = rows[0].map(value => String(value || '').replace(/^\uFEFF/, '').trim());
+  const headers = rawHeaders.map(normalized);
+  const indexOf = aliases => headers.findIndex(header => aliases.includes(header));
+  const partIndex = indexOf(['part', 'partnum', 'partnumber', 'designid']);
+  const colorIdIndex = indexOf(['colorid', 'colourid', 'rebrickablecolorid', 'rbcolorid']);
+  const colorIndex = indexOf(['color', 'colour', 'colorname', 'colourname', 'couleur']);
+  const locationIndex = indexOf(['location', 'storagelocation', 'emplacement', 'case', 'bin', 'drawer']);
+  if (partIndex < 0 || colorIndex < 0 || locationIndex < 0) throw new Error(`L’export ${label} ne contient pas les colonnes Part, Color et Location attendues.`);
+  const locationHeader = headers[locationIndex];
+  const records = rows.slice(1).map((sourceRow, index) => {
+    const row = [...sourceRow];
+    while (row.length < headers.length) row.push('');
+    const values = {};
+    headers.forEach((header, columnIndex) => { values[header] = String(row[columnIndex] ?? ''); });
+    const explicitColorId = colorIdIndex >= 0 ? String(row[colorIdIndex] || '').trim() : '';
+    const colorValue = String(row[colorIndex] || '').trim();
+    const numericColor = explicitColorId || (/^-?\d+$/.test(colorValue) ? colorValue : '');
+    const item = {
+      partNum: String(row[partIndex] || '').trim(),
+      colorId: /^-?\d+$/.test(numericColor) ? Number(numericColor) : null,
+      colorName: numericColor ? '' : colorValue
+    };
+    return {
+      rowNumber: index + 2,
+      item,
+      identity: mappingIdentity(item),
+      color: colorValue,
+      location: String(row[locationIndex] || '').trim(),
+      values
+    };
+  });
+  return { headers, rawHeaders, locationHeader, records };
+}
+
+function verifyRebrickableImport(baseContent, importedContent, mappings) {
+  const base = rebrickableTable(baseContent, 'de la liste de référence');
+  const imported = rebrickableTable(importedContent, 'de la liste importée');
+  const baseFields = base.headers.filter(header => header !== base.locationHeader);
+  const importedFields = imported.headers.filter(header => header !== imported.locationHeader);
+  const allFields = [...new Set([...baseFields, ...importedFields])];
+  const displayNames = new Map();
+  base.headers.forEach((header, index) => displayNames.set(header, base.rawHeaders[index] || header));
+  imported.headers.forEach((header, index) => { if (!displayNames.has(header)) displayNames.set(header, imported.rawHeaders[index] || header); });
+  const schema = [
+    ...baseFields.filter(field => !importedFields.includes(field)).map(field => `Colonne absente de la liste importée : ${displayNames.get(field)}`),
+    ...importedFields.filter(field => !baseFields.includes(field)).map(field => `Colonne ajoutée dans la liste importée : ${displayNames.get(field)}`)
+  ];
+  const expectedLocations = new Map((mappings || []).map(item => [mappingIdentity(item), String(item.location || '').trim()]));
+  const importedByIdentity = new Map();
+  imported.records.forEach(record => {
+    if (!importedByIdentity.has(record.identity)) importedByIdentity.set(record.identity, []);
+    importedByIdentity.get(record.identity).push(record);
+  });
+  const missing = [];
+  const fieldChanges = [];
+  const wrongLocations = [];
+  let matchedRows = 0;
+  let expectedLocationChanges = 0;
+  let verifiedLocationChanges = 0;
+  const fieldDifference = (left, right) => allFields.filter(field => String(left.values[field] ?? '') !== String(right.values[field] ?? ''));
+  for (const baseRecord of base.records) {
+    const candidates = importedByIdentity.get(baseRecord.identity) || [];
+    if (!candidates.length) {
+      missing.push({ partNum: baseRecord.item.partNum, color: baseRecord.color, row: baseRecord.rowNumber });
+      continue;
+    }
+    const ranked = candidates.map((record, index) => ({ record, index, differences: fieldDifference(baseRecord, record) }))
+      .sort((a, b) => a.differences.length - b.differences.length || a.record.rowNumber - b.record.rowNumber);
+    const selected = ranked[0];
+    candidates.splice(selected.index, 1);
+    matchedRows += 1;
+    if (selected.differences.length) {
+      fieldChanges.push({
+        partNum: baseRecord.item.partNum,
+        color: baseRecord.color,
+        fields: selected.differences.map(field => ({ field: displayNames.get(field) || field, before: String(baseRecord.values[field] ?? ''), after: String(selected.record.values[field] ?? '') }))
+      });
+    }
+    const expectedLocation = expectedLocations.has(baseRecord.identity) ? expectedLocations.get(baseRecord.identity) : baseRecord.location;
+    if (expectedLocation !== baseRecord.location) expectedLocationChanges += 1;
+    if (selected.record.location === expectedLocation) {
+      if (expectedLocation !== baseRecord.location) verifiedLocationChanges += 1;
+    } else {
+      wrongLocations.push({ partNum: baseRecord.item.partNum, color: baseRecord.color, before: baseRecord.location, expected: expectedLocation, actual: selected.record.location });
+    }
+  }
+  const extra = [...importedByIdentity.values()].flat().map(record => ({ partNum: record.item.partNum, color: record.color, row: record.rowNumber }));
+  const issueCounts = { schema: schema.length, missing: missing.length, extra: extra.length, fieldChanges: fieldChanges.length, wrongLocations: wrongLocations.length };
+  const issueTotal = Object.values(issueCounts).reduce((sum, value) => sum + value, 0);
+  const limit = values => values.slice(0, 100);
+  return {
+    safe: issueTotal === 0 && verifiedLocationChanges === expectedLocationChanges,
+    baseRows: base.records.length,
+    importedRows: imported.records.length,
+    matchedRows,
+    expectedLocationChanges,
+    verifiedLocationChanges,
+    issueCounts,
+    issues: { schema: limit(schema), missing: limit(missing), extra: limit(extra), fieldChanges: limit(fieldChanges), wrongLocations: limit(wrongLocations) },
+    truncated: Object.values({ schema, missing, extra, fieldChanges, wrongLocations }).some(values => values.length > 100)
+  };
+}
+
 function mappingsFromCsv(content) {
   const rows = parseCsv(content);
   if (rows.length < 2) throw new Error('Le fichier CSV est vide.');
@@ -1320,6 +1426,19 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, assignLocation(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
+  if (req.method === 'POST' && req.url === '/api/storage/verify-import') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      const input = JSON.parse(raw || '{}');
+      const baseListId = Number(input.baseListId);
+      const importedListId = Number(input.importedListId);
+      if (!Number.isInteger(baseListId) || baseListId <= 0 || !Number.isInteger(importedListId) || importedListId <= 0) throw new Error('Les identifiants de listes sont invalides.');
+      if (baseListId === importedListId) throw new Error('Indiquez l’identifiant de la nouvelle liste importée, différent de 108467.');
+      const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+      const report = verifyRebrickableImport(input.baseContent, input.importedContent, mappings);
+      return send(res, 200, { ...report, baseListId, importedListId, checkedAt: new Date().toISOString() });
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
   if (req.method === 'GET' && req.url === '/api/storage/cases') {
     const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
     return send(res, 200, { occupied: occupiedCases(mappings), empty: inferredEmptyCases(mappings) });
@@ -1413,4 +1532,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, rebrickableCsvWithLocations, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, rebrickableCsvWithLocations, verifyRebrickableImport, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange, networkUrls, server };

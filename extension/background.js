@@ -17,9 +17,14 @@ const delay = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 
 async function syncInBackground(url, mode) {
   const target = new URL(url);
-  if (target.origin !== 'https://rebrickable.com' || !/^\/(?:users\/sourivore\/partlists\/108467|sets\/|mocs\/)/.test(target.pathname)) {
+  const defaultList = /^\/users\/sourivore\/partlists\/108467\/?$/.test(target.pathname);
+  const verificationList = /^\/users\/sourivore\/partlists\/\d+\/?$/.test(target.pathname);
+  const model = /^\/(?:sets|mocs)\//.test(target.pathname);
+  const allowed = mode === 'verification' ? verificationList : mode === 'locations' ? defaultList : model;
+  if (target.origin !== 'https://rebrickable.com' || !allowed) {
     throw new Error('URL Rebrickable non autorisée.');
   }
+  if (mode === 'verification') target.searchParams.set('lego_rangement_verification', '1');
   if (mode === 'moc') target.hash = 'parts';
   const tab = await chrome.tabs.create({ url: target.href, active: false });
   try {
@@ -47,6 +52,23 @@ async function syncDefaultLocations() {
   finally { defaultLocationsPromise = null; }
 }
 
+async function verifyImportedList(value) {
+  const importedListId = Number(value);
+  if (!Number.isInteger(importedListId) || importedListId <= 0) throw new Error('Indiquez un identifiant de liste Rebrickable valide.');
+  if (importedListId === 108467) throw new Error('Indiquez l’identifiant de la nouvelle liste importée, différent de 108467.');
+  const importedUrl = `https://rebrickable.com/users/sourivore/partlists/${importedListId}/`;
+  const [base, imported] = await Promise.all([
+    syncInBackground(DEFAULT_PART_LIST, 'verification'),
+    syncInBackground(importedUrl, 'verification')
+  ]);
+  return postLocal('/api/storage/verify-import', {
+    baseListId: 108467,
+    importedListId,
+    baseContent: base.content,
+    importedContent: imported.content
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   (async () => {
     if (message?.type === 'SAVE_CSV') return postLocal('/api/locations/import', { content: message.content });
@@ -54,6 +76,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'SAVE_MODEL_CSV') return postLocal('/api/model-inventory/import', { sourceUrl: message.sourceUrl, content: message.content, metadata: message.metadata });
     if (message?.type === 'SYNC_DEFAULT_LOCATIONS') return syncDefaultLocations();
     if (message?.type === 'SYNC_URL') return message.mode === 'locations' ? syncDefaultLocations() : syncInBackground(message.url, message.mode);
+    if (message?.type === 'VERIFY_IMPORTED_LIST') return verifyImportedList(message.importedListId);
     throw new Error('Commande inconnue.');
   })().then(data => respond({ ok: true, ...data })).catch(error => respond({ ok: false, error: error.message }));
   return true;

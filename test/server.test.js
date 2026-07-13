@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, rebrickableCsvWithLocations, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, rebrickableCsvWithLocations, verifyRebrickableImport, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, splitCaseAdvice, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -23,6 +23,30 @@ test('prépare un CSV Rebrickable complet en ne modifiant que les emplacements',
   assert.match(result.content, /3001,4,12,"note, conservée",C2,False,False/);
   assert.match(result.content, /3002,1,7,,B1,True,False/);
   assert.match(result.content, /3003,2,3,,,False,False/);
+});
+test('valide un import qui ne change que les emplacements attendus', () => {
+  const base = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,note,A1,False,False\n3002,1,7,,B1,True,False\n3003,2,3,,,False,False\n';
+  const imported = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,note,C2,False,False\n3002,1,7,,D4,True,False\n3003,2,3,,,False,False\n';
+  const report = verifyRebrickableImport(base, imported, [
+    { partNum: '3001', colorId: 4, location: 'C2' },
+    { partNum: '3002', colorId: 1, location: 'D4' }
+  ]);
+  assert.equal(report.safe, true);
+  assert.equal(report.expectedLocationChanges, 2);
+  assert.equal(report.verifiedLocationChanges, 2);
+  assert.deepEqual(report.issueCounts, { schema: 0, missing: 0, extra: 0, fieldChanges: 0, wrongLocations: 0 });
+});
+test('signale séparément chaque anomalie d’un import Rebrickable', () => {
+  const base = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,12,note,A1,False,False\n3002,1,7,,B1,True,False\n3003,2,3,,C1,False,False\n';
+  const imported = 'Part,Color,Quantity,Notes,Location,IsUsed,IsStickered\n3001,4,13,note,C2,False,False\n3002,1,7,,Z9,True,False\n3004,2,3,,C1,False,False\n';
+  const report = verifyRebrickableImport(base, imported, [
+    { partNum: '3001', colorId: 4, location: 'C2' },
+    { partNum: '3002', colorId: 1, location: 'D4' }
+  ]);
+  assert.equal(report.safe, false);
+  assert.deepEqual(report.issueCounts, { schema: 0, missing: 1, extra: 1, fieldChanges: 1, wrongLocations: 1 });
+  assert.equal(report.issues.fieldChanges[0].fields[0].field, 'Quantity');
+  assert.deepEqual(report.issues.wrongLocations[0], { partNum: '3002', color: '1', before: 'B1', expected: 'D4', actual: 'Z9' });
 });
 test('regroupe toutes les références par case occupée', () => {
   const cases = occupiedCases([

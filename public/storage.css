@@ -100,6 +100,27 @@
 .history-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .history-tools .section-help { margin: 0; }
 .move-history { display: grid; gap: 8px; max-height: 60vh; margin-top: 12px; overflow: auto; overscroll-behavior: contain; }
+.verification-form { padding: 0; border: 0; box-shadow: none; }
+.verification-form > label { display: block; margin-bottom: 7px; font-weight: 800; }
+.verification-form > div { display: grid; grid-template-columns: minmax(160px, 1fr) auto; gap: 9px; }
+.verification-form button { min-height: 50px; }
+.verification-report { display: grid; gap: 8px; }
+.verification-summary { display: grid; grid-template-columns: 54px minmax(0,1fr); align-items: center; gap: 12px; padding: 14px; border: 2px solid; border-radius: 9px; }
+.verification-summary h3, .verification-summary p { margin: 0; }
+.verification-summary p { margin-top: 3px; font-size: 12px; }
+.verification-success { border-color: var(--green); background: #edf8f2; }
+.verification-failure { border-color: var(--red); background: #fff0ed; }
+.verification-mark { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--green); color: white; font-size: 28px; font-weight: 900; }
+.verification-failure .verification-mark { background: var(--red); }
+.verification-issues { margin: 0; padding: 0; overflow: hidden; border: 1px solid #ddd7ca; border-radius: 7px; background: white; }
+.verification-issues > summary { display: flex; align-items: center; justify-content: space-between; min-height: 46px; padding: 8px 11px; list-style: none; }
+.verification-issues > summary::-webkit-details-marker { display: none; }
+.verification-issues > summary b { padding: 3px 8px; border-radius: 99px; background: #f3d7d2; color: #8f2119; }
+.verification-issues > div { max-height: 42vh; padding: 4px 11px 10px; overflow: auto; border-top: 1px solid #eee8dd; }
+.verification-issues p { margin: 7px 0; font-size: 12px; overflow-wrap: anywhere; }
+.verification-issues p span { color: #68716d; }
+.verification-issues article { padding: 8px 0; border-bottom: 1px solid #eee8dd; }
+.verification-warning { color: #8f2119; font-size: 12px; font-weight: 750; }
 .history-entry { display: grid; grid-template-columns: 58px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e5e0d6; border-radius: 7px; background: white; }
 .history-thumb { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 6px; background: #faf8f2; }
 .history-thumb img { max-width: 50px; max-height: 50px; }
@@ -126,6 +147,8 @@
   .storage-card { padding: 12px; }
   .storage-form > div { display: block; }
   .storage-form button { width: 100%; margin-top: 8px; }
+  .verification-form > div { grid-template-columns: 1fr; }
+  .verification-form button { width: 100%; }
   .section-title { display: block; margin-bottom: 10px; }
   .storage-heading-tools { display: grid; grid-template-columns: 1fr 1fr; margin-top: 10px; }
   .storage-heading-tools > span { grid-column: 1 / -1; width: max-content; }

@@ -15,6 +15,7 @@ let currentCase = '';
 let currentItems = [];
 let currentAdvice = null;
 let extensionReady = false;
+let verificationReady = false;
 const pendingExtensionSync = new Map();
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
@@ -31,10 +32,13 @@ window.addEventListener('message', event => {
   if (event.source !== window || message?.source !== 'LEGO_RANGEMENT_EXTENSION') return;
   if (message.type === 'READY') {
     extensionReady = true;
+    verificationReady = String(message.version || '').localeCompare('3.4.0', undefined, { numeric: true }) >= 0;
     document.querySelector('#resyncLocations').disabled = false;
+    document.querySelector('#verifyImportButton').disabled = !verificationReady;
+    if (!verificationReady) document.querySelector('#verificationStatus').textContent = 'Rechargez le module LEGO Rangement 3.4.0 depuis chrome://extensions avant cette vérification.';
     return;
   }
-  if (message.type !== 'SYNC_RESULT') return;
+  if (!['SYNC_RESULT', 'VERIFY_IMPORT_RESULT'].includes(message.type)) return;
   const pending = pendingExtensionSync.get(message.requestId);
   if (!pending) return;
   pendingExtensionSync.delete(message.requestId);
@@ -53,6 +57,20 @@ function syncLocationsViaExtension() {
       pendingExtensionSync.delete(requestId);
       reject(new Error('Le module Chrome n’a pas répondu.'));
     }, 45000);
+  });
+}
+
+function verifyImportViaExtension(importedListId) {
+  if (!extensionReady || !verificationReady) return Promise.reject(new Error('Rechargez le module LEGO Rangement 3.4.0 depuis chrome://extensions.'));
+  return new Promise((resolve, reject) => {
+    const requestId = `${Date.now()}-${Math.random()}`;
+    pendingExtensionSync.set(requestId, { resolve, reject });
+    window.postMessage({ source: 'LEGO_RANGEMENT_APP', type: 'VERIFY_IMPORT', requestId, importedListId }, location.origin);
+    setTimeout(() => {
+      if (!pendingExtensionSync.has(requestId)) return;
+      pendingExtensionSync.delete(requestId);
+      reject(new Error('La comparaison Rebrickable n’a pas répondu dans le délai prévu.'));
+    }, 120000);
   });
 }
 
@@ -330,6 +348,57 @@ document.querySelector('#exportRebrickable').addEventListener('click', async eve
   } finally {
     button.disabled = false;
     button.textContent = originalText;
+  }
+});
+
+function renderVerificationReport(report) {
+  const container = document.querySelector('#verificationReport');
+  document.querySelector('#verificationBadge').textContent = `${report.baseListId} → ${report.importedListId}`;
+  const issueSection = (title, count, content) => count ? `<details class="verification-issues"><summary><span>${escapeHtml(title)}</span><b>${count}</b></summary><div>${content}</div></details>` : '';
+  const schema = (report.issues.schema || []).map(message => `<p>${escapeHtml(message)}</p>`).join('');
+  const missing = (report.issues.missing || []).map(item => `<p><strong>${escapeHtml(item.partNum)}</strong> · couleur ${escapeHtml(item.color)} <span>absente de la nouvelle liste</span></p>`).join('');
+  const extra = (report.issues.extra || []).map(item => `<p><strong>${escapeHtml(item.partNum)}</strong> · couleur ${escapeHtml(item.color)} <span>ajoutée dans la nouvelle liste</span></p>`).join('');
+  const fields = (report.issues.fieldChanges || []).map(item => `<article><strong>${escapeHtml(item.partNum)} · couleur ${escapeHtml(item.color)}</strong>${item.fields.map(change => `<p><b>${escapeHtml(change.field)}</b> : « ${escapeHtml(change.before)} » → « ${escapeHtml(change.after)} »</p>`).join('')}</article>`).join('');
+  const locations = (report.issues.wrongLocations || []).map(item => `<p><strong>${escapeHtml(item.partNum)}</strong> · couleur ${escapeHtml(item.color)} : case attendue <b>${escapeHtml(item.expected || 'vide')}</b>, case obtenue <b>${escapeHtml(item.actual || 'vide')}</b> <span>(origine ${escapeHtml(item.before || 'vide')})</span></p>`).join('');
+  const counts = report.issueCounts || {};
+  container.innerHTML = `<section class="verification-summary ${report.safe ? 'verification-success' : 'verification-failure'}">
+      <div class="verification-mark">${report.safe ? '✓' : '!'}</div>
+      <div><h3>${report.safe ? 'Import vérifié : aucune anomalie' : 'Import non conforme'}</h3><p>${report.baseRows} lignes dans la liste de référence · ${report.importedRows} dans la liste importée.</p><p><strong>${report.verifiedLocationChanges} changement${report.verifiedLocationChanges === 1 ? '' : 's'} de case vérifié${report.verifiedLocationChanges === 1 ? '' : 's'}</strong> sur ${report.expectedLocationChanges} attendu${report.expectedLocationChanges === 1 ? '' : 's'}.</p></div>
+    </section>
+    ${issueSection('Colonnes différentes', counts.schema || 0, schema)}
+    ${issueSection('Pièces manquantes', counts.missing || 0, missing)}
+    ${issueSection('Pièces ajoutées', counts.extra || 0, extra)}
+    ${issueSection('Quantités, notes ou états modifiés', counts.fieldChanges || 0, fields)}
+    ${issueSection('Cases incorrectes', counts.wrongLocations || 0, locations)}
+    ${report.truncated ? '<p class="verification-warning">Le rapport visuel est limité aux 100 premiers écarts de chaque catégorie.</p>' : ''}`;
+}
+
+document.querySelector('#verifyImportForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = document.querySelector('#importedListId');
+  const button = document.querySelector('#verifyImportButton');
+  const status = document.querySelector('#verificationStatus');
+  const importedListId = Number(input.value.trim());
+  if (!Number.isInteger(importedListId) || importedListId <= 0) return;
+  if (importedListId === 108467) {
+    status.textContent = 'Indiquez l’ID de la nouvelle liste importée, pas celui de la liste de référence 108467.';
+    return;
+  }
+  button.disabled = true;
+  button.textContent = 'Comparaison en cours…';
+  status.textContent = `Téléchargement en lecture seule des listes 108467 et ${importedListId}…`;
+  document.querySelector('#verificationReport').innerHTML = '';
+  try {
+    const report = await verifyImportViaExtension(importedListId);
+    renderVerificationReport(report);
+    status.textContent = report.safe
+      ? `Vérification terminée le ${new Date(report.checkedAt).toLocaleString('fr-FR')} : l’import est conforme.`
+      : `Vérification terminée : ${Object.values(report.issueCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0)} anomalie(s) détectée(s).`;
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = !verificationReady;
+    button.textContent = 'Comparer les deux listes';
   }
 });
 
