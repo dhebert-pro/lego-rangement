@@ -24,15 +24,13 @@
 
     <section class="storage-card empty-card">
       <div class="section-title"><div><p class="eyebrow">DISPONIBILITÉ</p><h2>Cases vides</h2></div><span id="emptyCount">0</span></div>
-      <form id="emptyCaseForm" class="inline-storage-form"><input id="emptyCaseLocation" required maxlength="80" placeholder="Ajouter une case vide"><button>Ajouter</button></form>
-      <p class="section-help">Une case vidée par un déplacement est ajoutée automatiquement. Une case utilisée comme destination est retirée de cette liste.</p>
+      <p class="section-help">Cette liste est calculée automatiquement à partir des numéros de cases utilisés. Elle se met à jour après chaque déplacement ou restauration.</p>
       <div id="emptyCasesList" class="empty-case-list"></div>
-      <p id="emptyStatus" class="storage-status" aria-live="polite"></p>
     </section>
 
     <section class="storage-card history-card">
       <div class="section-title"><div><p class="eyebrow">MÉMOIRE</p><h2>Pièces déplacées</h2></div><button id="clearHistory" type="button" class="danger-button">Vider l’historique</button></div>
-      <p class="section-help">Cet historique reste disponible jusqu’à ce que vous le vidiez. Le vider n’annule pas les déplacements.</p>
+      <p class="section-help">Une pièce déplacée plusieurs fois n’apparaît qu’une fois, de sa case d’origine à sa case actuelle. Vider l’historique restaure toutes les pièces dans leur emplacement d’origine.</p>
       <div id="moveHistory" class="move-history"></div>
       <p id="historyStatus" class="storage-status" aria-live="polite"></p>
     </section>

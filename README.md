@@ -24,7 +24,9 @@ Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu�
 
 La page **Gérer les cases** (`/storage.html`) affiche toutes les références présentes dans une case. Plusieurs références peuvent être cochées puis déplacées ensemble vers une autre case. Les nouveaux emplacements restent prioritaires lors des synchronisations Rebrickable suivantes.
 
-Chaque déplacement est conservé dans `move-history.local.json` avec l’ancien et le nouvel emplacement jusqu’à l’utilisation du bouton **Vider l’historique**. Les cases saisies comme vides sont enregistrées dans `empty-cases.local.json` ; une case entièrement vidée est ajoutée automatiquement et une case utilisée comme destination est retirée.
+Les déplacements sont enregistrés sur le serveur du PC et sont donc partagés avec le téléphone. Une pièce déplacée plusieurs fois ne conserve qu’un trajet entre sa case d’origine et sa case actuelle. Le bouton **Vider l’historique** restaure toutes ces pièces dans leur case d’origine avant d’effacer le journal.
+
+Les cases libres sont déduites automatiquement des séries de numéros présentes dans la collection et sont recalculées après chaque déplacement ou restauration. Les images exactes de chaque couleur sont chargées progressivement puis mises en cache localement.
 
 Les miniatures des deux pages s’agrandissent au survol sur ordinateur et au toucher sur téléphone.
 

@@ -73,7 +73,7 @@ function renderCaseLists() {
   document.querySelector('#allCases').innerHTML = [...occupiedCases.map(item => item.location), ...emptyCases.map(item => item.location)]
     .filter((value, index, values) => values.indexOf(value) === index).map(location => `<option value="${escapeHtml(location)}"></option>`).join('');
   document.querySelector('#emptyCount').textContent = emptyCases.length;
-  document.querySelector('#emptyCasesList').innerHTML = emptyCases.length ? emptyCases.map(item => `<span class="empty-case">${escapeHtml(item.location)}<button type="button" data-remove-empty="${escapeHtml(item.location)}" aria-label="Retirer la case vide ${escapeHtml(item.location)}">×</button></span>`).join('') : '<p class="empty-message">Aucune case vide enregistrée.</p>';
+  document.querySelector('#emptyCasesList').innerHTML = emptyCases.length ? emptyCases.map(item => `<span class="empty-case">${escapeHtml(item.location)}</span>`).join('') : '<p class="empty-message">Aucune case libre détectée.</p>';
 }
 
 async function loadCases() {
@@ -88,7 +88,7 @@ function renderHistory(moves) {
   list.innerHTML = moves.length ? [...moves].reverse().map(move => `<article class="history-entry">
     <span class="history-thumb">${move.imageUrl ? `<img src="${escapeHtml(move.imageUrl)}" data-preview alt="Agrandir ${escapeHtml(move.name)}">` : '◫'}</span>
     <div><strong>${escapeHtml(move.name || move.partNum)}</strong><span>${escapeHtml(move.colorName || 'Couleur inconnue')} · ${escapeHtml(move.partNum)}${move.quantity == null ? '' : ` · × ${move.quantity}`}</span><span>${new Date(move.movedAt).toLocaleString('fr-FR')}</span></div>
-    <div class="history-route"><b>${escapeHtml(move.fromLocation)}</b><span>→</span><b>${escapeHtml(move.toLocation)}</b></div>
+    <div class="history-route"><b>${escapeHtml(move.originalLocation || move.fromLocation)}</b><span>→</span><b>${escapeHtml(move.currentLocation || move.toLocation)}</b></div>
   </article>`).join('') : '<p class="empty-message">Aucune pièce déplacée depuis le dernier effacement.</p>';
   document.querySelector('#clearHistory').disabled = !moves.length;
 }
@@ -125,33 +125,12 @@ moveForm.addEventListener('submit', async event => {
   finally { button.disabled = false; button.textContent = 'Changer la case'; }
 });
 
-document.querySelector('#emptyCaseForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const location = document.querySelector('#emptyCaseLocation').value.trim();
-  const status = document.querySelector('#emptyStatus');
-  try {
-    await request('/api/storage/empty-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ location }) });
-    document.querySelector('#emptyCaseLocation').value = '';
-    await loadCases();
-    status.textContent = `Case vide ${location} ajoutée.`;
-  } catch (error) { status.textContent = error.message; }
-});
-
-document.querySelector('#emptyCasesList').addEventListener('click', async event => {
-  const button = event.target.closest('[data-remove-empty]');
-  if (!button) return;
-  const location = button.dataset.removeEmpty;
-  try {
-    await request('/api/storage/empty-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'remove', location }) });
-    await loadCases();
-    document.querySelector('#emptyStatus').textContent = `Case ${location} retirée de la liste.`;
-  } catch (error) { document.querySelector('#emptyStatus').textContent = error.message; }
-});
-
 document.querySelector('#clearHistory').addEventListener('click', async () => {
   const data = await request('/api/storage/history/clear', { method: 'POST' });
   renderHistory(data.moves || []);
-  document.querySelector('#historyStatus').textContent = 'Historique effacé. Les nouveaux emplacements sont conservés.';
+  await loadCases();
+  if (currentCase) await loadCase(currentCase);
+  document.querySelector('#historyStatus').textContent = `${data.revertedCount || 0} pièce${data.revertedCount === 1 ? '' : 's'} replacée${data.revertedCount === 1 ? '' : 's'} dans la case d’origine. Historique effacé.`;
 });
 
 Promise.all([loadCases(), loadHistory()]).catch(error => { caseStatus.textContent = error.message; });

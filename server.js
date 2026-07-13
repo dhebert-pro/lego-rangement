@@ -13,9 +13,9 @@ const LOCATIONS_PATH = path.join(__dirname, 'locations.local.json');
 const PROGRESS_PATH = path.join(__dirname, 'progress.local.json');
 const SET_INVENTORIES_PATH = path.join(__dirname, 'set-inventories.local.json');
 const MOVE_HISTORY_PATH = path.join(__dirname, 'move-history.local.json');
-const EMPTY_CASES_PATH = path.join(__dirname, 'empty-cases.local.json');
 const LOCATION_OVERRIDES_PATH = path.join(__dirname, 'location-overrides.local.json');
 const PART_CATALOG_PATH = path.join(__dirname, 'part-catalog.local.json');
+const COLOR_IMAGES_PATH = path.join(__dirname, 'color-images.local.json');
 const LDRAW_DIMENSIONS_PATH = path.join(__dirname, 'data', 'ldraw-dimensions.json');
 const STUDIO_META_PATH = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Stud.io', 'BLBrickMetaInfo') : path.join(os.homedir(), 'AppData', 'Local', 'Stud.io', 'BLBrickMetaInfo');
 
@@ -455,20 +455,25 @@ function occupiedCases(mappings) {
   })).sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
 }
 
-function emptyCasesState(mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || []) {
-  const occupied = new Set(occupiedCases(mappings).map(item => item.location.toLocaleLowerCase('fr')));
-  const saved = readJson(EMPTY_CASES_PATH, { cases: [] }).cases || [];
-  return saved.filter(item => !occupied.has(String(item.location || '').toLocaleLowerCase('fr')))
-    .sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
-}
-
-function saveEmptyCases(cases) {
-  const unique = new Map();
-  for (const item of cases || []) {
-    const location = String(item.location || item || '').trim();
-    if (location) unique.set(location.toLocaleLowerCase('fr'), { location, addedAt: item.addedAt || new Date().toISOString() });
+function inferredEmptyCases(mappings) {
+  const occupied = new Set(occupiedCases(mappings).map(item => item.location.toLocaleUpperCase()));
+  const groups = new Map();
+  for (const location of occupied) {
+    const match = location.match(/^([A-Z]*)(\d+)$/);
+    if (!match) continue;
+    const prefix = match[1];
+    groups.set(prefix, [...(groups.get(prefix) || []), Number(match[2])]);
   }
-  fs.writeFileSync(EMPTY_CASES_PATH, `${JSON.stringify({ cases: [...unique.values()] }, null, 2)}\n`, 'utf8');
+  const alphaMax = Math.max(0, ...[...groups.entries()].filter(([prefix]) => prefix).flatMap(([, values]) => values));
+  const empty = [];
+  for (const [prefix, values] of groups) {
+    const maximum = prefix ? alphaMax : Math.max(...values);
+    for (let number = 1; number <= maximum; number += 1) {
+      const location = `${prefix}${number}`;
+      if (!occupied.has(location)) empty.push({ location });
+    }
+  }
+  return empty.sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
 }
 
 function moveStorageMappings(mappings, input) {
@@ -490,9 +495,8 @@ function moveStorageMappings(mappings, input) {
 }
 
 async function storageCatalog() {
-  const locationData = readJson(LOCATIONS_PATH, { mappings: [] });
   const cached = readJson(PART_CATALOG_PATH, { items: [] });
-  if (cached.items?.length && cached.sourceImportedAt === locationData.importedAt) return cached.items;
+  if (cached.items?.length) return cached.items;
   const local = savedConfig();
   if (!local.apiKey || !local.userToken) return cached.items || [];
   try {
@@ -507,7 +511,7 @@ async function storageCatalog() {
       quantity: Number(item.quantity) || null,
       bricklinkId: item.part?.external_ids?.BrickLink?.[0] || ''
     })).filter(item => item.partNum);
-    fs.writeFileSync(PART_CATALOG_PATH, `${JSON.stringify({ syncedAt: new Date().toISOString(), sourceImportedAt: locationData.importedAt || null, items }, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(PART_CATALOG_PATH, `${JSON.stringify({ syncedAt: new Date().toISOString(), items }, null, 2)}\n`, 'utf8');
     return items;
   } catch {
     return cached.items || [];
@@ -532,7 +536,7 @@ async function storageCase(location) {
         colorId: mapping.colorId,
         colorName: detail.colorName || mapping.colorName || '',
         name: detail.name || mapping.partNum,
-        imageUrl: detail.imageUrl || '',
+        imageUrl: mapping.colorId == null ? detail.imageUrl || '' : `/api/storage/image?partNum=${encodeURIComponent(mapping.partNum)}&colorId=${encodeURIComponent(mapping.colorId)}`,
         quantity: mapping.quantity ?? detail.quantity ?? null,
         bricklinkUrl: detail.bricklinkId ? `https://www.bricklink.com/v2/catalog/catalogitem.page?P=${encodeURIComponent(detail.bricklinkId)}` : ''
       };
@@ -540,17 +544,60 @@ async function storageCase(location) {
   };
 }
 
-function updateEmptyCase(input) {
-  const location = String(input.location || '').trim();
-  if (!location || location.length > 80) throw new Error('Indiquez une case valide.');
-  const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
-  const occupied = mappings.some(mapping => String(mapping.location || '').toLocaleLowerCase('fr') === location.toLocaleLowerCase('fr'));
-  if (input.action !== 'remove' && occupied) throw new Error(`La case ${location} contient encore des pièces.`);
-  let cases = readJson(EMPTY_CASES_PATH, { cases: [] }).cases || [];
-  cases = cases.filter(item => String(item.location || '').toLocaleLowerCase('fr') !== location.toLocaleLowerCase('fr'));
-  if (input.action !== 'remove') cases.push({ location, addedAt: new Date().toISOString() });
-  saveEmptyCases(cases);
-  return { cases: emptyCasesState(mappings) };
+let colorImageCache;
+const colorImageRequests = new Map();
+
+async function partColorImage(partNum, colorId) {
+  const part = String(partNum || '').trim();
+  const color = Number(colorId);
+  if (!/^[a-z0-9_-]{1,80}$/i.test(part) || !Number.isInteger(color)) throw new Error('Référence de pièce invalide.');
+  colorImageCache ||= readJson(COLOR_IMAGES_PATH, { images: {} });
+  colorImageCache.images ||= {};
+  const key = `${part}|${color}`;
+  if (colorImageCache.images[key]) return colorImageCache.images[key];
+  if (colorImageRequests.has(key)) return colorImageRequests.get(key);
+  const pending = (async () => {
+    const local = savedConfig();
+    if (!local.apiKey) throw new Error('Clé API Rebrickable absente.');
+    const detail = await requestJson(`https://rebrickable.com/api/v3/lego/parts/${encodeURIComponent(part)}/colors/${color}/`, local.apiKey);
+    const imageUrl = detail.part_img_url || detail.elements?.find(element => element.part_img_url)?.part_img_url || '';
+    if (!/^https:\/\//.test(imageUrl)) throw new Error('Image couleur indisponible.');
+    colorImageCache.images[key] = imageUrl;
+    fs.writeFileSync(COLOR_IMAGES_PATH, `${JSON.stringify(colorImageCache, null, 2)}\n`, 'utf8');
+    return imageUrl;
+  })();
+  colorImageRequests.set(key, pending);
+  try { return await pending; }
+  finally { colorImageRequests.delete(key); }
+}
+
+function consolidateMoveHistory(existingMoves, movedItems, metadataItems = []) {
+  const metadata = new Map(metadataItems.map(item => [mappingIdentity(item), item]));
+  const historyMap = new Map();
+  for (const entry of existingMoves || []) {
+    const key = mappingIdentity(entry);
+    const previous = historyMap.get(key);
+    historyMap.set(key, {
+      ...previous, ...entry, id: previous?.id || entry.id || randomUUID(),
+      originalLocation: previous?.originalLocation || entry.originalLocation || entry.fromLocation,
+      currentLocation: entry.currentLocation || entry.toLocation
+    });
+  }
+  for (const item of movedItems || []) {
+    const key = mappingIdentity(item);
+    const detail = metadata.get(key) || {};
+    const previous = historyMap.get(key);
+    const entry = {
+      id: previous?.id || randomUUID(), movedAt: previous?.movedAt || new Date().toISOString(), updatedAt: new Date().toISOString(),
+      partNum: item.partNum, colorId: item.colorId,
+      colorName: String(detail.colorName || item.colorName || '').slice(0, 100), name: String(detail.name || item.partNum).slice(0, 200),
+      imageUrl: /^(?:https:\/\/|\/api\/storage\/image\?)/.test(String(detail.imageUrl || '')) ? String(detail.imageUrl) : '', quantity: item.quantity ?? detail.quantity ?? null,
+      originalLocation: previous?.originalLocation || item.fromLocation, currentLocation: item.toLocation
+    };
+    if (entry.originalLocation.toLocaleLowerCase('fr') === entry.currentLocation.toLocaleLowerCase('fr')) historyMap.delete(key);
+    else historyMap.set(key, entry);
+  }
+  return [...historyMap.values()];
 }
 
 function moveStorage(input) {
@@ -560,28 +607,32 @@ function moveStorage(input) {
 
   const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
   const overrideMap = new Map(overrides.map(item => [mappingIdentity(item), item]));
-  result.moved.forEach(item => overrideMap.set(mappingIdentity(item), { partNum: item.partNum, colorId: item.colorId, colorName: item.colorName || '', location: item.toLocation }));
-  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: [...overrideMap.values()] }, null, 2)}\n`, 'utf8');
-
-  const metadata = new Map((input.items || []).map(item => [mappingIdentity(item), item]));
   const history = readJson(MOVE_HISTORY_PATH, { moves: [] });
-  history.moves ||= [];
+  history.moves = consolidateMoveHistory(history.moves || [], result.moved, input.items || []);
+  const changed = new Set(history.moves.map(mappingIdentity));
   result.moved.forEach(item => {
-    const detail = metadata.get(mappingIdentity(item)) || {};
-    history.moves.push({
-      id: randomUUID(), movedAt: new Date().toISOString(), partNum: item.partNum, colorId: item.colorId,
-      colorName: String(detail.colorName || item.colorName || '').slice(0, 100), name: String(detail.name || item.partNum).slice(0, 200),
-      imageUrl: /^https:\/\//.test(String(detail.imageUrl || '')) ? String(detail.imageUrl) : '', quantity: item.quantity ?? detail.quantity ?? null,
-      fromLocation: item.fromLocation, toLocation: item.toLocation
-    });
+    const key = mappingIdentity(item);
+    if (changed.has(key)) overrideMap.set(key, { partNum: item.partNum, colorId: item.colorId, colorName: item.colorName || '', location: item.toLocation });
+    else overrideMap.delete(key);
   });
   fs.writeFileSync(MOVE_HISTORY_PATH, `${JSON.stringify(history, null, 2)}\n`, 'utf8');
-
-  let empty = readJson(EMPTY_CASES_PATH, { cases: [] }).cases || [];
-  empty = empty.filter(item => String(item.location || '').toLocaleLowerCase('fr') !== String(input.toLocation).trim().toLocaleLowerCase('fr'));
-  if (result.sourceEmpty) empty.push({ location: String(input.fromLocation).trim(), addedAt: new Date().toISOString() });
-  saveEmptyCases(empty);
+  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: [...overrideMap.values()] }, null, 2)}\n`, 'utf8');
   return { movedCount: result.moved.length, sourceEmpty: result.sourceEmpty, historyCount: history.moves.length };
+}
+
+function revertMoveHistory() {
+  const history = readJson(MOVE_HISTORY_PATH, { moves: [] });
+  const moves = consolidateMoveHistory(history.moves || [], []);
+  if (!moves.length) return { moves: [], revertedCount: 0 };
+  const originals = new Map(moves.map(item => [mappingIdentity(item), item.originalLocation || item.fromLocation]));
+  const current = readJson(LOCATIONS_PATH, { mappings: [] });
+  current.mappings = (current.mappings || []).map(mapping => originals.has(mappingIdentity(mapping)) ? { ...mapping, location: originals.get(mappingIdentity(mapping)) } : mapping);
+  fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ ...current, modifiedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8');
+
+  const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
+  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: overrides.filter(item => !originals.has(mappingIdentity(item))) }, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(MOVE_HISTORY_PATH, `${JSON.stringify({ moves: [] }, null, 2)}\n`, 'utf8');
+  return { moves: [], revertedCount: moves.length };
 }
 
 function progressSetKey(setNum, inventory) {
@@ -849,13 +900,21 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'GET' && req.url === '/api/storage/cases') {
     const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
-    return send(res, 200, { occupied: occupiedCases(mappings), empty: emptyCasesState(mappings) });
+    return send(res, 200, { occupied: occupiedCases(mappings), empty: inferredEmptyCases(mappings) });
   }
   if (req.method === 'GET' && req.url.startsWith('/api/storage/case?')) {
     try {
       const location = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams.get('location');
       return send(res, 200, await storageCase(location));
     } catch (error) { return send(res, 400, { error: error.message }); }
+  }
+  if (req.method === 'GET' && req.url.startsWith('/api/storage/image?')) {
+    try {
+      const query = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams;
+      const imageUrl = await partColorImage(query.get('partNum'), query.get('colorId'));
+      res.writeHead(302, { location: imageUrl, 'cache-control': 'public, max-age=604800' });
+      return res.end();
+    } catch { return send(res, 404, { error: 'Image couleur indisponible.' }); }
   }
   if (req.method === 'POST' && req.url === '/api/storage/move') {
     try {
@@ -864,17 +923,11 @@ const server = http.createServer(async (req, res) => {
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
   if (req.method === 'GET' && req.url === '/api/storage/history') {
-    return send(res, 200, readJson(MOVE_HISTORY_PATH, { moves: [] }));
+    const history = readJson(MOVE_HISTORY_PATH, { moves: [] });
+    return send(res, 200, { moves: consolidateMoveHistory(history.moves || [], []) });
   }
   if (req.method === 'POST' && req.url === '/api/storage/history/clear') {
-    fs.writeFileSync(MOVE_HISTORY_PATH, `${JSON.stringify({ moves: [] }, null, 2)}\n`, 'utf8');
-    return send(res, 200, { moves: [] });
-  }
-  if (req.method === 'POST' && req.url === '/api/storage/empty-cases') {
-    try {
-      let raw = ''; for await (const chunk of req) raw += chunk;
-      return send(res, 200, updateEmptyCase(JSON.parse(raw || '{}')));
-    } catch (error) { return send(res, 400, { error: error.message }); }
+    return send(res, 200, revertMoveHistory());
   }
   if (req.method === 'POST' && req.url === '/api/progress') {
     try {
@@ -902,4 +955,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, moveStorageMappings, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange, networkUrls, server };

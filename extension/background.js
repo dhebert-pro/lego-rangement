@@ -40,15 +40,9 @@ async function syncInBackground(url, mode) {
   }
 }
 
-async function syncDefaultLocations(force = false) {
+async function syncDefaultLocations() {
   if (defaultLocationsPromise) return defaultLocationsPromise;
-  defaultLocationsPromise = (async () => {
-    const state = await chrome.storage.local.get('lastLocationSync');
-    if (!force && Date.now() - Number(state.lastLocationSync || 0) < 10 * 60 * 1000) return { skipped: true };
-    const result = await syncInBackground(DEFAULT_PART_LIST, 'locations');
-    await chrome.storage.local.set({ lastLocationSync: Date.now() });
-    return result;
-  })();
+  defaultLocationsPromise = syncInBackground(DEFAULT_PART_LIST, 'locations');
   try { return await defaultLocationsPromise; }
   finally { defaultLocationsPromise = null; }
 }
@@ -58,8 +52,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'SAVE_CSV') return postLocal('/api/locations/import', { content: message.content });
     if (message?.type === 'SAVE_SET_CSV') return postLocal('/api/set-inventory/import', { sourceUrl: message.sourceUrl, content: message.content });
     if (message?.type === 'SAVE_MODEL_CSV') return postLocal('/api/model-inventory/import', { sourceUrl: message.sourceUrl, content: message.content, metadata: message.metadata });
-    if (message?.type === 'SYNC_DEFAULT_LOCATIONS') return syncDefaultLocations(false);
-    if (message?.type === 'SYNC_URL') return message.mode === 'locations' ? syncDefaultLocations(true) : syncInBackground(message.url, message.mode);
+    if (message?.type === 'SYNC_DEFAULT_LOCATIONS') return syncDefaultLocations();
+    if (message?.type === 'SYNC_URL') return message.mode === 'locations' ? syncDefaultLocations() : syncInBackground(message.url, message.mode);
     throw new Error('Commande inconnue.');
   })().then(data => respond({ ok: true, ...data })).catch(error => respond({ ok: false, error: error.message }));
   return true;

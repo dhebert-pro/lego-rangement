@@ -3,9 +3,9 @@ locations.local.json
 progress.local.json
 set-inventories.local.json
 move-history.local.json
-empty-cases.local.json
 location-overrides.local.json
 part-catalog.local.json
+color-images.local.json
 data/ldraw-complete.zip
 ldraw-cache.local.json
 *.log

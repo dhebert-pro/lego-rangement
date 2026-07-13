@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, moveStorageMappings, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, inferredEmptyCases, moveStorageMappings, consolidateMoveHistory, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -33,6 +33,21 @@ test('déplace plusieurs références et détecte une case vidée', () => {
   assert.equal(result.sourceEmpty, true);
   assert.deepEqual(result.mappings.map(item => item.location), ['E1', 'E1', 'D4']);
   assert.deepEqual(result.moved.map(item => [item.fromLocation, item.toLocation]), [['C2', 'E1'], ['C2', 'E1']]);
+});
+test('déduit les cases libres dans les séries de rangement', () => {
+  assert.deepEqual(inferredEmptyCases([
+    { partNum: '1', colorId: 1, location: 'A1' },
+    { partNum: '2', colorId: 1, location: 'A3' },
+    { partNum: '3', colorId: 1, location: 'B2' }
+  ]).map(item => item.location), ['A2', 'B1', 'B3']);
+});
+test('conserve uniquement le trajet entre la première et la dernière case', () => {
+  const first = consolidateMoveHistory([], [{ partNum: '3001', colorId: 1, fromLocation: 'A1', toLocation: 'B1' }]);
+  const second = consolidateMoveHistory(first, [{ partNum: '3001', colorId: 1, fromLocation: 'B1', toLocation: 'C1' }]);
+  assert.equal(second.length, 1);
+  assert.equal(second[0].originalLocation, 'A1');
+  assert.equal(second[0].currentLocation, 'C1');
+  assert.deepEqual(consolidateMoveHistory(second, [{ partNum: '3001', colorId: 1, fromLocation: 'C1', toLocation: 'A1' }]), []);
 });
 test('conserve la version inventory demandée dans le lien', () => {
   assert.equal(inventoryFromUrl('https://rebrickable.com/sets/21309-1/name/?_=123&inventory=1#parts'), 1);

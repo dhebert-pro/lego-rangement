@@ -128,11 +128,9 @@
       const response = mode === 'locations' && !location.pathname.startsWith('/users/sourivore/partlists/108467')
         ? await chrome.runtime.sendMessage({ type: 'SYNC_DEFAULT_LOCATIONS' })
         : await performSync(mode);
-      button.textContent = response.skipped
-        ? 'Liste déjà synchronisée ✓'
-        : mode === 'locations'
-          ? `${response.count} emplacements synchronisés ✓`
-          : `${response.count} références synchronisées ✓`;
+      button.textContent = mode === 'locations'
+        ? `${response.count} emplacements synchronisés ✓`
+        : `${response.count} références synchronisées ✓`;
       button.style.background = '#91e0b9';
     } catch (error) {
       button.textContent = error.message;
@@ -150,7 +148,9 @@
     return true;
   });
 
-  if (!location.pathname.startsWith('/users/sourivore/partlists/108467')) {
+  if (location.pathname.startsWith('/users/sourivore/partlists/108467')) {
+    if (document.visibilityState === 'visible') performSync('locations').catch(() => {});
+  } else {
     chrome.runtime.sendMessage({ type: 'SYNC_DEFAULT_LOCATIONS' }).catch(() => {});
   }
 })();

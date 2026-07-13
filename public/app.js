@@ -374,7 +374,7 @@ async function autoLogin() {
     importStatus.textContent = 'Synchronisation automatique de la part list…';
     if (config.local) {
       syncViaExtension('locations', 'https://rebrickable.com/users/sourivore/partlists/108467/')
-        .then(result => { importStatus.className = 'connected'; importStatus.textContent = result.skipped ? `${config.locationCount || 0} emplacements locaux à jour.` : `${result.count} emplacements synchronisés automatiquement.`; })
+        .then(result => { importStatus.className = 'connected'; importStatus.textContent = `${result.count} emplacements synchronisés automatiquement.`; })
         .catch(error => { importStatus.textContent = config.locationCount ? `${config.locationCount} emplacements locaux disponibles.` : error.message; });
     } else {
       document.querySelector('#connection').hidden = true;

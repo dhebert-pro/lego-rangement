@@ -8,7 +8,7 @@
 .storage-form { padding: 0; border: 0; box-shadow: none; }
 .storage-form > label { display: block; margin-bottom: 7px; font-weight: 800; }
 .storage-form > div { display: flex; gap: 9px; }
-.storage-form button, .inline-storage-form button, .move-bar button { min-height: 50px; }
+.storage-form button, .move-bar button { min-height: 50px; }
 .storage-status { min-height: 22px; margin: 10px 0; color: #68716d; }
 .case-actions { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; padding: 10px 12px; border-radius: 7px; background: #edf5f1; }
 .case-actions label { display: flex; align-items: center; gap: 8px; font-weight: 750; }
@@ -29,11 +29,9 @@
 .move-bar div span { display: block; color: #cbd5d0; font-size: 12px; }
 .move-bar label { font-size: 12px; font-weight: 800; }
 .move-bar input { padding: 10px 12px; }
-.inline-storage-form { display: flex; gap: 9px; padding: 0; border: 0; box-shadow: none; }
 .section-help { margin: 8px 0 15px; color: #68716d; font-size: 12px; }
 .empty-case-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .empty-case { display: flex; align-items: center; gap: 8px; padding: 8px 9px 8px 13px; border-radius: 99px; background: #e9f4ef; font-weight: 850; }
-.empty-case button { width: 28px; height: 28px; padding: 0; border-radius: 50%; background: white; color: var(--red); }
 .danger-button { min-height: 42px; background: #f2d8d4; color: #8f2119; }
 .move-history { display: grid; gap: 8px; }
 .history-entry { display: grid; grid-template-columns: 58px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e5e0d6; border-radius: 7px; background: white; }
@@ -52,8 +50,8 @@
 }
 @media (max-width: 700px) {
   .storage-card { padding: 16px; }
-  .storage-form > div, .inline-storage-form { display: block; }
-  .storage-form button, .inline-storage-form button { width: 100%; margin-top: 8px; }
+  .storage-form > div { display: block; }
+  .storage-form button { width: 100%; margin-top: 8px; }
   .section-title { align-items: flex-start; }
   .section-title h2 { font-size: 22px; }
   .storage-part { grid-template-columns: 24px 64px minmax(0,1fr); padding: 9px; }
