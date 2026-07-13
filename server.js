@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const os = require('node:os');
+const { randomUUID } = require('node:crypto');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -11,7 +12,10 @@ const CONFIG_PATH = path.join(__dirname, 'config.local.json');
 const LOCATIONS_PATH = path.join(__dirname, 'locations.local.json');
 const PROGRESS_PATH = path.join(__dirname, 'progress.local.json');
 const SET_INVENTORIES_PATH = path.join(__dirname, 'set-inventories.local.json');
-const OVERFULL_CASES_PATH = path.join(__dirname, 'overfull-cases.local.json');
+const MOVE_HISTORY_PATH = path.join(__dirname, 'move-history.local.json');
+const EMPTY_CASES_PATH = path.join(__dirname, 'empty-cases.local.json');
+const LOCATION_OVERRIDES_PATH = path.join(__dirname, 'location-overrides.local.json');
+const PART_CATALOG_PATH = path.join(__dirname, 'part-catalog.local.json');
 const LDRAW_DIMENSIONS_PATH = path.join(__dirname, 'data', 'ldraw-dimensions.json');
 const STUDIO_META_PATH = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Stud.io', 'BLBrickMetaInfo') : path.join(os.homedir(), 'AppData', 'Local', 'Stud.io', 'BLBrickMetaInfo');
 
@@ -283,8 +287,16 @@ function parseCsv(text) {
 
 const normalized = value => String(value || '').replace(/^\uFEFF/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+const mappingIdentity = item => `${String(item.partNum || '').trim()}|${item.colorId == null ? `name:${String(item.colorName || '').trim().toLocaleLowerCase('fr')}` : `id:${Number(item.colorId)}`}`;
+
+function applyLocationOverrides(mappings) {
+  const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
+  const byIdentity = new Map(overrides.map(item => [mappingIdentity(item), item.location]));
+  return (mappings || []).map(mapping => byIdentity.has(mappingIdentity(mapping)) ? { ...mapping, location: byIdentity.get(mappingIdentity(mapping)) } : mapping);
+}
+
 function importLocations(content) {
-  const mappings = mappingsFromCsv(content);
+  const mappings = applyLocationOverrides(mappingsFromCsv(content));
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ importedAt: new Date().toISOString(), mappings }, null, 2)}\n`, 'utf8');
   return mappings.length;
 }
@@ -297,6 +309,7 @@ function mappingsFromCsv(content) {
   const partIndex = indexOf(['part', 'partnum', 'partnumber', 'designid', 'numero', 'numerodepiece']);
   const colorIdIndex = indexOf(['colorid', 'colourid', 'rebrickablecolorid', 'rbcolorid']);
   const colorIndex = indexOf(['color', 'colour', 'colorname', 'colourname', 'couleur']);
+  const quantityIndex = indexOf(['quantity', 'qty', 'quantite']);
   let locationIndex = indexOf(['location', 'storagelocation', 'emplacement', 'case', 'bin', 'drawer']);
   if (locationIndex < 0) locationIndex = indexOf(['note', 'notes']);
   if (partIndex < 0 || locationIndex < 0) throw new Error('Colonnes Part et Location introuvables dans ce CSV.');
@@ -308,6 +321,7 @@ function mappingsFromCsv(content) {
       partNum: String(row[partIndex] || '').trim(),
       colorId: /^-?\d+$/.test(numericColor) ? Number(numericColor) : null,
       colorName: numericColor ? '' : colorValue,
+      quantity: quantityIndex >= 0 && Number.isFinite(Number(row[quantityIndex])) ? Number(row[quantityIndex]) : null,
       location: String(row[locationIndex] || '').trim()
     };
   }).filter(item => item.partNum && item.location);
@@ -385,12 +399,13 @@ function importModelInventory(sourceUrl, content, metadata = {}) {
 }
 
 function importLocationMappings(input) {
-  const mappings = (Array.isArray(input) ? input : []).map(item => ({
+  const mappings = applyLocationOverrides((Array.isArray(input) ? input : []).map(item => ({
     partNum: String(item.partNum || '').trim(),
     colorId: Number.isInteger(Number(item.colorId)) && String(item.colorId).trim() !== '' ? Number(item.colorId) : null,
     colorName: String(item.colorName || '').trim(),
+    quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : null,
     location: String(item.location || '').trim()
-  })).filter(item => item.partNum && item.location);
+  })).filter(item => item.partNum && item.location));
   if (!mappings.length) throw new Error('Aucun emplacement détecté sur la page Rebrickable.');
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ importedAt: new Date().toISOString(), mappings }, null, 2)}\n`, 'utf8');
   return mappings.length;
@@ -418,8 +433,7 @@ function assignLocation(input) {
   return { mapping: mappings[mappings.length - 1], count: mappings.length };
 }
 
-function storageCases(mappings, selectedLocations = []) {
-  const selected = new Set(selectedLocations.map(value => String(value || '').trim().toLocaleLowerCase('fr')));
+function occupiedCases(mappings) {
   const byLocation = new Map();
   for (const mapping of mappings || []) {
     const location = String(mapping.location || '').trim();
@@ -433,31 +447,141 @@ function storageCases(mappings, selectedLocations = []) {
     item.parts.add(partNum);
     item.colors.add(color);
   }
-  return [...byLocation.entries()].map(([key, item]) => ({
+  return [...byLocation.values()].map(item => ({
     location: item.location,
     referenceCount: item.references.size,
     partCount: item.parts.size,
-    colorCount: item.colors.size,
-    overfull: selected.has(key)
+    colorCount: item.colors.size
   })).sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
 }
 
-function overfullCasesState() {
-  const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
-  const saved = readJson(OVERFULL_CASES_PATH, { cases: [] }).cases || [];
-  const cases = storageCases(mappings, saved.map(item => item.location));
-  return { cases, selectedCount: cases.filter(item => item.overfull).length };
+function emptyCasesState(mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || []) {
+  const occupied = new Set(occupiedCases(mappings).map(item => item.location.toLocaleLowerCase('fr')));
+  const saved = readJson(EMPTY_CASES_PATH, { cases: [] }).cases || [];
+  return saved.filter(item => !occupied.has(String(item.location || '').toLocaleLowerCase('fr')))
+    .sort((a, b) => a.location.localeCompare(b.location, 'fr', { numeric: true }));
 }
 
-function updateOverfullCases(input) {
-  if (!Array.isArray(input.locations)) throw new Error('Liste de cases invalide.');
-  const available = storageCases(readJson(LOCATIONS_PATH, { mappings: [] }).mappings || []);
-  const byKey = new Map(available.map(item => [item.location.toLocaleLowerCase('fr'), item.location]));
-  const locations = [...new Set(input.locations.map(value => String(value || '').trim().toLocaleLowerCase('fr')))]
-    .map(key => byKey.get(key)).filter(Boolean);
-  const now = new Date().toISOString();
-  fs.writeFileSync(OVERFULL_CASES_PATH, `${JSON.stringify({ cases: locations.map(location => ({ location, updatedAt: now })) }, null, 2)}\n`, 'utf8');
-  return overfullCasesState();
+function saveEmptyCases(cases) {
+  const unique = new Map();
+  for (const item of cases || []) {
+    const location = String(item.location || item || '').trim();
+    if (location) unique.set(location.toLocaleLowerCase('fr'), { location, addedAt: item.addedAt || new Date().toISOString() });
+  }
+  fs.writeFileSync(EMPTY_CASES_PATH, `${JSON.stringify({ cases: [...unique.values()] }, null, 2)}\n`, 'utf8');
+}
+
+function moveStorageMappings(mappings, input) {
+  const fromLocation = String(input.fromLocation || '').trim();
+  const toLocation = String(input.toLocation || '').trim();
+  if (!fromLocation || !toLocation) throw new Error('Indiquez les cases de départ et d’arrivée.');
+  if (fromLocation.length > 80 || toLocation.length > 80) throw new Error('Numéro de case invalide.');
+  if (fromLocation.toLocaleLowerCase('fr') === toLocation.toLocaleLowerCase('fr')) throw new Error('La nouvelle case doit être différente.');
+  if (!Array.isArray(input.items) || !input.items.length) throw new Error('Sélectionnez au moins une pièce.');
+  const selected = new Set(input.items.map(mappingIdentity));
+  const moved = [];
+  const next = (mappings || []).map(mapping => {
+    if (String(mapping.location || '').toLocaleLowerCase('fr') !== fromLocation.toLocaleLowerCase('fr') || !selected.has(mappingIdentity(mapping))) return mapping;
+    moved.push({ ...mapping, fromLocation: mapping.location, toLocation });
+    return { ...mapping, location: toLocation };
+  });
+  if (!moved.length) throw new Error('Aucune pièce sélectionnée n’a été trouvée dans cette case.');
+  return { mappings: next, moved, sourceEmpty: !next.some(mapping => String(mapping.location || '').toLocaleLowerCase('fr') === fromLocation.toLocaleLowerCase('fr')) };
+}
+
+async function storageCatalog() {
+  const locationData = readJson(LOCATIONS_PATH, { mappings: [] });
+  const cached = readJson(PART_CATALOG_PATH, { items: [] });
+  if (cached.items?.length && cached.sourceImportedAt === locationData.importedAt) return cached.items;
+  const local = savedConfig();
+  if (!local.apiKey || !local.userToken) return cached.items || [];
+  try {
+    const partListId = Number(local.partListId || 108467);
+    const parts = await getAll(`https://rebrickable.com/api/v3/users/${encodeURIComponent(local.userToken)}/partlists/${partListId}/parts/?page_size=500`, local.apiKey);
+    const items = parts.map(item => ({
+      partNum: String(item.part?.part_num || ''),
+      colorId: item.color?.id == null ? null : Number(item.color.id),
+      colorName: String(item.color?.name || ''),
+      name: String(item.part?.name || item.part?.part_num || ''),
+      imageUrl: String(item.part?.part_img_url || ''),
+      quantity: Number(item.quantity) || null,
+      bricklinkId: item.part?.external_ids?.BrickLink?.[0] || ''
+    })).filter(item => item.partNum);
+    fs.writeFileSync(PART_CATALOG_PATH, `${JSON.stringify({ syncedAt: new Date().toISOString(), sourceImportedAt: locationData.importedAt || null, items }, null, 2)}\n`, 'utf8');
+    return items;
+  } catch {
+    return cached.items || [];
+  }
+}
+
+async function storageCase(location) {
+  const requested = String(location || '').trim();
+  if (!requested) throw new Error('Indiquez une case.');
+  if (requested.length > 80) throw new Error('Numéro de case invalide.');
+  const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+  const matches = mappings.filter(mapping => String(mapping.location || '').toLocaleLowerCase('fr') === requested.toLocaleLowerCase('fr'));
+  const catalog = await storageCatalog();
+  const exact = new Map(catalog.map(item => [mappingIdentity(item), item]));
+  const byPart = new Map(catalog.map(item => [item.partNum, item]));
+  return {
+    location: matches[0]?.location || requested,
+    items: matches.map(mapping => {
+      const detail = exact.get(mappingIdentity(mapping)) || byPart.get(mapping.partNum) || {};
+      return {
+        partNum: mapping.partNum,
+        colorId: mapping.colorId,
+        colorName: detail.colorName || mapping.colorName || '',
+        name: detail.name || mapping.partNum,
+        imageUrl: detail.imageUrl || '',
+        quantity: mapping.quantity ?? detail.quantity ?? null,
+        bricklinkUrl: detail.bricklinkId ? `https://www.bricklink.com/v2/catalog/catalogitem.page?P=${encodeURIComponent(detail.bricklinkId)}` : ''
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }))
+  };
+}
+
+function updateEmptyCase(input) {
+  const location = String(input.location || '').trim();
+  if (!location || location.length > 80) throw new Error('Indiquez une case valide.');
+  const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+  const occupied = mappings.some(mapping => String(mapping.location || '').toLocaleLowerCase('fr') === location.toLocaleLowerCase('fr'));
+  if (input.action !== 'remove' && occupied) throw new Error(`La case ${location} contient encore des pièces.`);
+  let cases = readJson(EMPTY_CASES_PATH, { cases: [] }).cases || [];
+  cases = cases.filter(item => String(item.location || '').toLocaleLowerCase('fr') !== location.toLocaleLowerCase('fr'));
+  if (input.action !== 'remove') cases.push({ location, addedAt: new Date().toISOString() });
+  saveEmptyCases(cases);
+  return { cases: emptyCasesState(mappings) };
+}
+
+function moveStorage(input) {
+  const current = readJson(LOCATIONS_PATH, { mappings: [] });
+  const result = moveStorageMappings(current.mappings || [], input);
+  fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ ...current, modifiedAt: new Date().toISOString(), mappings: result.mappings }, null, 2)}\n`, 'utf8');
+
+  const overrides = readJson(LOCATION_OVERRIDES_PATH, { mappings: [] }).mappings || [];
+  const overrideMap = new Map(overrides.map(item => [mappingIdentity(item), item]));
+  result.moved.forEach(item => overrideMap.set(mappingIdentity(item), { partNum: item.partNum, colorId: item.colorId, colorName: item.colorName || '', location: item.toLocation }));
+  fs.writeFileSync(LOCATION_OVERRIDES_PATH, `${JSON.stringify({ mappings: [...overrideMap.values()] }, null, 2)}\n`, 'utf8');
+
+  const metadata = new Map((input.items || []).map(item => [mappingIdentity(item), item]));
+  const history = readJson(MOVE_HISTORY_PATH, { moves: [] });
+  history.moves ||= [];
+  result.moved.forEach(item => {
+    const detail = metadata.get(mappingIdentity(item)) || {};
+    history.moves.push({
+      id: randomUUID(), movedAt: new Date().toISOString(), partNum: item.partNum, colorId: item.colorId,
+      colorName: String(detail.colorName || item.colorName || '').slice(0, 100), name: String(detail.name || item.partNum).slice(0, 200),
+      imageUrl: /^https:\/\//.test(String(detail.imageUrl || '')) ? String(detail.imageUrl) : '', quantity: item.quantity ?? detail.quantity ?? null,
+      fromLocation: item.fromLocation, toLocation: item.toLocation
+    });
+  });
+  fs.writeFileSync(MOVE_HISTORY_PATH, `${JSON.stringify(history, null, 2)}\n`, 'utf8');
+
+  let empty = readJson(EMPTY_CASES_PATH, { cases: [] }).cases || [];
+  empty = empty.filter(item => String(item.location || '').toLocaleLowerCase('fr') !== String(input.toLocation).trim().toLocaleLowerCase('fr'));
+  if (result.sourceEmpty) empty.push({ location: String(input.fromLocation).trim(), addedAt: new Date().toISOString() });
+  saveEmptyCases(empty);
+  return { movedCount: result.moved.length, sourceEmpty: result.sourceEmpty, historyCount: history.moves.length };
 }
 
 function progressSetKey(setNum, inventory) {
@@ -575,7 +699,7 @@ function importBackup(filename, base64) {
   });
   const unique = new Map();
   mappings.forEach(mapping => unique.set(`${mapping.partNum}|${mapping.colorId ?? mapping.colorName}|${mapping.location}`, mapping));
-  const cleaned = [...unique.values()];
+  const cleaned = applyLocationOverrides([...unique.values()]);
   if (!cleaned.length) throw new Error('Aucun champ Location associé à une pièce n’a été trouvé dans cette sauvegarde.');
   fs.writeFileSync(LOCATIONS_PATH, `${JSON.stringify({ importedAt: new Date().toISOString(), source: filename, mappings: cleaned }, null, 2)}\n`, 'utf8');
   return cleaned.length;
@@ -723,13 +847,33 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, assignLocation(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
-  if (req.method === 'GET' && req.url === '/api/overfull-cases') {
-    return send(res, 200, overfullCasesState());
+  if (req.method === 'GET' && req.url === '/api/storage/cases') {
+    const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+    return send(res, 200, { occupied: occupiedCases(mappings), empty: emptyCasesState(mappings) });
   }
-  if (req.method === 'POST' && req.url === '/api/overfull-cases') {
+  if (req.method === 'GET' && req.url.startsWith('/api/storage/case?')) {
+    try {
+      const location = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams.get('location');
+      return send(res, 200, await storageCase(location));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
+  if (req.method === 'POST' && req.url === '/api/storage/move') {
     try {
       let raw = ''; for await (const chunk of req) raw += chunk;
-      return send(res, 200, updateOverfullCases(JSON.parse(raw || '{}')));
+      return send(res, 200, moveStorage(JSON.parse(raw || '{}')));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
+  if (req.method === 'GET' && req.url === '/api/storage/history') {
+    return send(res, 200, readJson(MOVE_HISTORY_PATH, { moves: [] }));
+  }
+  if (req.method === 'POST' && req.url === '/api/storage/history/clear') {
+    fs.writeFileSync(MOVE_HISTORY_PATH, `${JSON.stringify({ moves: [] }, null, 2)}\n`, 'utf8');
+    return send(res, 200, { moves: [] });
+  }
+  if (req.method === 'POST' && req.url === '/api/storage/empty-cases') {
+    try {
+      let raw = ''; for await (const chunk of req) raw += chunk;
+      return send(res, 200, updateEmptyCase(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
   if (req.method === 'POST' && req.url === '/api/progress') {
@@ -758,4 +902,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, storageCases, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, moveStorageMappings, completedWithChange, networkUrls, server };

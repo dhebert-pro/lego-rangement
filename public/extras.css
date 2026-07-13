@@ -91,37 +91,23 @@ button.case { width: 100%; min-width: 0; border-radius: 0; text-align: left; whi
 .network-access span { color: #cbd5d0; font-size: 12px; }
 .network-access a { color: var(--yellow); font-size: 18px; font-weight: 850; overflow-wrap: anywhere; }
 .network-access button { min-height: 44px; }
-.overfull-cases { margin-top: 14px; padding: 16px 18px; border: 2px solid #e2aaa5; border-radius: 9px; background: #fff8f5; }
-.overfull-cases summary { display: flex; align-items: center; gap: 9px; color: #8f2119; }
-.overfull-cases summary b { min-width: 25px; padding: 2px 7px; border-radius: 99px; background: var(--red); color: white; text-align: center; }
-.overfull-cases > p { margin: 9px 0 13px; color: #68716d; font-size: 13px; }
-#overfullForm { padding: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
-.overfull-toolbar { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto; align-items: center; gap: 10px; }
-.overfull-toolbar label { font-size: 12px; font-weight: 800; }
-.overfull-toolbar input { padding: 10px 12px; }
-#overfullForm button { min-height: 43px; }
-#overfullForm .validate-overfull { width: 100%; margin-top: 12px; background: var(--red); color: white; }
-.overfull-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; max-height: 390px; margin-top: 13px; padding: 9px; overflow-y: auto; border: 1px solid #efd2cf; border-radius: 7px; background: white; }
-.overfull-total { grid-column: 1 / -1; margin: 0 0 3px; color: #68716d; font-size: 12px; }
-.overfull-option { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px; border: 2px solid #eadfda; border-radius: 6px; cursor: pointer; background: #fffdfa; }
-.overfull-option[hidden] { display: none; }
-.overfull-option:has(input:checked) { border-color: var(--red); background: #fff0ec; }
-.overfull-option input { flex: 0 0 auto; width: 20px; height: 20px; accent-color: var(--red); }
-.overfull-option span, .overfull-option strong, .overfull-option small { display: block; min-width: 0; }
-.overfull-option strong { font-size: 17px; overflow-wrap: anywhere; }
-.overfull-option small, .no-overfull { color: #68716d; font-size: 11px; }
-#overfullStatus { display: block; min-height: 18px; margin-top: 7px; }
-.overfull-advice { padding: 11px 13px; border-left: 5px solid var(--yellow); background: #fff8d5; }
+.page-switch { position: absolute; z-index: 3; top: 24px; right: max(6vw,24px); padding: 11px 16px; border: 2px solid #ffffff99; border-radius: 7px; color: white; font-weight: 850; text-decoration: none; }
+.page-switch:hover { border-color: var(--yellow); color: var(--yellow); }
+.image-hover-preview { position: fixed; z-index: 10000; width: 300px; height: 300px; display: grid; place-items: center; padding: 12px; border: 3px solid var(--yellow); border-radius: 10px; background: white; box-shadow: 0 18px 55px #0006; pointer-events: none; }
+.image-hover-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.image-lightbox { position: fixed; z-index: 10001; inset: 0; display: grid; place-items: center; padding: 24px; background: #07100dd9; }
+.image-lightbox[hidden], .image-hover-preview[hidden] { display: none; }
+.image-lightbox img { max-width: min(88vw,700px); max-height: 80vh; padding: 18px; border-radius: 12px; background: white; object-fit: contain; }
+.image-lightbox button { position: absolute; top: 18px; right: 18px; width: 48px; height: 48px; padding: 0; border-radius: 50%; font-size: 25px; }
+img[data-preview] { cursor: zoom-in; }
 .filters button { min-height: 42px; }
 @media (max-width: 700px) {
+  .page-switch { top: 15px; right: 15px; }
   .import-panel { align-items: stretch; flex-direction: column; }
   .file-button, .secondary-button { text-align: center; }
   .import-actions { align-items: stretch; flex-direction: column; }
   .split-note { margin: 0 -10px; padding-left: 10px; padding-right: 10px; }
   .network-access { align-items: stretch; flex-direction: column; }
-  .overfull-toolbar { display: block; }
-  .overfull-toolbar label, .overfull-toolbar input, .overfull-toolbar button { display: block; width: 100%; margin-top: 8px; }
-  .overfull-list { grid-template-columns: 1fr; max-height: 430px; }
   .result-head #stats { min-width: 0; margin-top: 12px; }
   .location-stat, .progress-stat > div { justify-content: flex-start; }
   .group, .group.expanded { display: block; }

@@ -2,7 +2,10 @@ config.local.json
 locations.local.json
 progress.local.json
 set-inventories.local.json
-overfull-cases.local.json
+move-history.local.json
+empty-cases.local.json
+location-overrides.local.json
+part-catalog.local.json
 data/ldraw-complete.zip
 ldraw-cache.local.json
 *.log

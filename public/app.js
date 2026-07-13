@@ -94,7 +94,7 @@ function coordinationHtml(part) {
 function partHtml(part, missing = false) {
   const sorting = part.sorting || LegoPlanner.pieceDifficulty(part);
   return `<div class="part ${missing ? 'unassigned' : ''} ${part.completed ? 'completed' : ''}">
-    <div class="part-visual"><label class="done-control"><input type="checkbox" data-toggle-complete data-row-key="${escapeHtml(keyOf(part))}" ${part.completed ? 'checked' : ''}><span aria-hidden="true">✓</span><small>Rangé</small></label><div class="pic">${part.part?.part_img_url ? `<img src="${escapeHtml(part.part.part_img_url)}" alt="">` : '◫'}</div></div>
+    <div class="part-visual"><label class="done-control"><input type="checkbox" data-toggle-complete data-row-key="${escapeHtml(keyOf(part))}" ${part.completed ? 'checked' : ''}><span aria-hidden="true">✓</span><small>Rangé</small></label><div class="pic">${part.part?.part_img_url ? `<img src="${escapeHtml(part.part.part_img_url)}" data-preview alt="Agrandir ${escapeHtml(part.part?.name || part.part?.part_num)}">` : '◫'}</div></div>
     <div class="part-info"><b>${escapeHtml(part.part?.name || part.part?.part_num)}</b><span>${escapeHtml(part.color?.name)} · ${escapeHtml(part.part?.part_num)}${part.bricklinkUrl ? ` · <a href="${escapeHtml(part.bricklinkUrl)}" target="_blank" rel="noreferrer">fiche BrickLink</a>` : ''}</span><span class="physical-data">${escapeHtml(physicalLabel(part))}</span><span class="difficulty difficulty-${sorting.level.toLowerCase()}">${sorting.level} · ${escapeHtml(sorting.reasons.join(', '))}</span>${coordinationHtml(part)}${editorHtml(part, missing)}</div>
     <strong class="qty">× ${part.quantity}</strong>
   </div>`;
@@ -443,62 +443,6 @@ async function loadNetworkInfo() {
   } catch {}
 }
 
-function renderOverfullCases(cases) {
-  const list = document.querySelector('#overfullList');
-  document.querySelector('#overfullCount').textContent = cases.filter(item => item.overfull).length;
-  list.innerHTML = cases.length ? `<p class="overfull-total">${cases.length} cases utilisées</p>${cases.map(item => `<label class="overfull-option" data-search="${escapeHtml(item.location.toLocaleLowerCase('fr'))}"><input type="checkbox" value="${escapeHtml(item.location)}" ${item.overfull ? 'checked' : ''}><span><strong>${escapeHtml(item.location)}</strong><small>${item.referenceCount} référence${item.referenceCount > 1 ? 's' : ''} · ${item.partCount} type${item.partCount > 1 ? 's' : ''} · ${item.colorCount} couleur${item.colorCount > 1 ? 's' : ''}</small></span></label>`).join('')}` : '<p class="no-overfull">Aucune case occupée n’a été trouvée. Synchronisez d’abord votre liste Rebrickable.</p>';
-  filterOverfullCases(document.querySelector('#overfullSearch').value);
-}
-
-function filterOverfullCases(value) {
-  const query = String(value || '').trim().toLocaleLowerCase('fr');
-  document.querySelectorAll('.overfull-option').forEach(option => { option.hidden = !option.dataset.search.includes(query); });
-}
-
-function updateOverfullCount() {
-  document.querySelector('#overfullCount').textContent = document.querySelectorAll('#overfullList input:checked').length;
-  document.querySelector('#overfullAdvice').hidden = true;
-}
-
-async function loadOverfullCases() {
-  try {
-    const response = await fetch('/api/overfull-cases');
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-    renderOverfullCases(data.cases || []);
-  } catch (error) {
-    document.querySelector('#overfullStatus').textContent = error.message;
-  }
-}
-
-document.querySelector('#overfullForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const locations = [...document.querySelectorAll('#overfullList input:checked')].map(input => input.value);
-  const status = document.querySelector('#overfullStatus');
-  status.textContent = 'Enregistrement…';
-  try {
-    const response = await fetch('/api/overfull-cases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ locations }) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-    renderOverfullCases(data.cases || []);
-    const plural = data.selectedCount === 1 ? '' : 's';
-    status.textContent = `${data.selectedCount} case${plural} trop pleine${plural} enregistrée${plural}.`;
-    document.querySelector('#overfullAdvice').hidden = false;
-  } catch (error) { status.textContent = error.message; }
-});
-
-document.querySelector('#overfullList').addEventListener('change', updateOverfullCount);
-
-document.querySelector('#overfullSearch').addEventListener('input', event => {
-  filterOverfullCases(event.currentTarget.value);
-});
-
-document.querySelector('#clearOverfull').addEventListener('click', () => {
-  document.querySelectorAll('#overfullList input:checked').forEach(input => { input.checked = false; });
-  updateOverfullCount();
-  document.querySelector('#overfullStatus').textContent = 'Sélection effacée. Cliquez sur « Valider » pour enregistrer.';
-});
-
 document.querySelector('#copyNetworkUrl').addEventListener('click', async event => {
   const value = document.querySelector('#networkUrl').href;
   try {
@@ -511,4 +455,3 @@ document.querySelector('#copyNetworkUrl').addEventListener('click', async event 
 window.mergeParts = mergeParts;
 autoLogin();
 loadNetworkInfo();
-loadOverfullCases();

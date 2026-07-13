@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestion des cases · LEGO Rangement</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/extras.css">
+  <link rel="stylesheet" href="/storage.css">
+</head>
+<body>
+  <header class="storage-hero"><a class="page-switch" href="/">Ranger un modèle</a><img class="hero-brick" src="/brick.svg" alt="Brique de construction rouge en perspective"><div class="studs"><i></i><i></i><i></i><i></i></div><p class="eyebrow">GESTION DU STOCK</p><h1>Réorganiser<br><span>mes cases.</span></h1><p>Consultez le contenu d’une case, déplacez plusieurs références et gardez la trace de chaque changement.</p></header>
+  <main class="storage-main">
+    <section class="storage-card lookup-card">
+      <div class="section-title"><div><p class="eyebrow">CONTENU</p><h2>Afficher une case</h2></div><span id="occupiedCount"></span></div>
+      <form id="caseForm" class="storage-form"><label for="caseLocation">Numéro de case</label><div><input id="caseLocation" list="occupiedCases" required placeholder="Ex. C2" autocomplete="off"><button>Afficher les pièces</button></div></form>
+      <datalist id="occupiedCases"></datalist>
+      <datalist id="allCases"></datalist>
+      <p id="caseStatus" class="storage-status" aria-live="polite">Choisissez une case occupée.</p>
+      <div id="caseActions" class="case-actions" hidden><label><input id="selectAllParts" type="checkbox"> Tout sélectionner</label><strong id="selectionCount">0 pièce sélectionnée</strong></div>
+      <div id="caseItems" class="case-items"></div>
+      <form id="moveForm" class="move-bar" hidden><div><strong>Déplacer la sélection</strong><span id="moveSummary"></span></div><label for="targetLocation">Nouvelle case</label><input id="targetLocation" list="allCases" required placeholder="Ex. D4" autocomplete="off"><button>Changer la case</button></form>
+    </section>
+
+    <section class="storage-card empty-card">
+      <div class="section-title"><div><p class="eyebrow">DISPONIBILITÉ</p><h2>Cases vides</h2></div><span id="emptyCount">0</span></div>
+      <form id="emptyCaseForm" class="inline-storage-form"><input id="emptyCaseLocation" required maxlength="80" placeholder="Ajouter une case vide"><button>Ajouter</button></form>
+      <p class="section-help">Une case vidée par un déplacement est ajoutée automatiquement. Une case utilisée comme destination est retirée de cette liste.</p>
+      <div id="emptyCasesList" class="empty-case-list"></div>
+      <p id="emptyStatus" class="storage-status" aria-live="polite"></p>
+    </section>
+
+    <section class="storage-card history-card">
+      <div class="section-title"><div><p class="eyebrow">MÉMOIRE</p><h2>Pièces déplacées</h2></div><button id="clearHistory" type="button" class="danger-button">Vider l’historique</button></div>
+      <p class="section-help">Cet historique reste disponible jusqu’à ce que vous le vidiez. Le vider n’annule pas les déplacements.</p>
+      <div id="moveHistory" class="move-history"></div>
+      <p id="historyStatus" class="storage-status" aria-live="polite"></p>
+    </section>
+  </main>
+  <footer>Données fournies par Rebrickable · LEGO® est une marque du groupe LEGO.</footer>
+  <script src="/image-preview.js"></script>
+  <script src="/storage.js"></script>
+</body>
+</html>

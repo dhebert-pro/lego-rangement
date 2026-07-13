@@ -20,11 +20,13 @@ Chaque pièce ou étape entière peut être cochée comme rangée. **Tout décoc
 
 Le module Chrome 3.x synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant lors de son premier chargement et le conserve dans `set-inventories.local.json`. Il n’est pas nécessaire de relancer l’extension entre deux recherches ; son bouton **Actualiser** ne sert qu’après une mise à jour de son code.
 
-## Cases trop pleines
+## Gestion des cases
 
-Le panneau **Cases trop pleines** affiche toutes les cases occupées trouvées dans la liste Rebrickable. Il permet de rechercher, cocher puis valider les cases à réorganiser depuis le PC ou le téléphone. La sélection est partagée dans `overfull-cases.local.json` et exclue de Git. Pour le moment elle sert uniquement de registre : les dimensions des cases et les emplacements vides devront être renseignés avant de proposer un déplacement, une séparation cohérente ou un regroupement.
+La page **Gérer les cases** (`/storage.html`) affiche toutes les références présentes dans une case. Plusieurs références peuvent être cochées puis déplacées ensemble vers une autre case. Les nouveaux emplacements restent prioritaires lors des synchronisations Rebrickable suivantes.
 
-La future analyse devra préserver des groupes de pièces faciles à comprendre et séparer autant que possible les couleurs visuellement proches, sauf lorsque cette séparation casserait une cohérence de forme ou de catégorie plus importante.
+Chaque déplacement est conservé dans `move-history.local.json` avec l’ancien et le nouvel emplacement jusqu’à l’utilisation du bouton **Vider l’historique**. Les cases saisies comme vides sont enregistrées dans `empty-cases.local.json` ; une case entièrement vidée est ajoutée automatiquement et une case utilisée comme destination est retirée.
+
+Les miniatures des deux pages s’agrandissent au survol sur ordinateur et au toucher sur téléphone.
 
 ## Ordre de rangement
 

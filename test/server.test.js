@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, storageCases, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, moveStorageMappings, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -9,20 +9,30 @@ test('rejette une valeur invalide', () => assert.throws(() => cleanSetNumber('Ap
 test('reconnaît un lien de MOC avec son slug', () => assert.deepEqual(cleanModel('https://rebrickable.com/mocs/MOC-261470/Wurger%20Bricks/1989-bat-mobile/#details'), { type: 'moc', id: 'MOC-261470' }));
 test('interprète la colonne Color Rebrickable comme un identifiant numérique', () => {
   const [part] = mappingsFromCsv('Part,Color,Quantity,Notes,Location,IsUsed\n3707,0,8,,C2,False\n');
-  assert.deepEqual(part, { partNum: '3707', colorId: 0, colorName: '', location: 'C2' });
+  assert.deepEqual(part, { partNum: '3707', colorId: 0, colorName: '', quantity: 8, location: 'C2' });
 });
 test('regroupe toutes les références par case occupée', () => {
-  const cases = storageCases([
+  const cases = occupiedCases([
     { partNum: '3001', colorId: 1, location: 'C2' },
     { partNum: '3001', colorId: 2, location: 'C2' },
     { partNum: '3002', colorId: 1, location: 'C2' },
     { partNum: '3003', colorId: 1, location: 'Sans case' },
     { partNum: '3004', colorId: 1, location: 'A10' }
-  ], ['c2']);
-  assert.deepEqual(cases, [
-    { location: 'A10', referenceCount: 1, partCount: 1, colorCount: 1, overfull: false },
-    { location: 'C2', referenceCount: 3, partCount: 2, colorCount: 2, overfull: true }
   ]);
+  assert.deepEqual(cases, [
+    { location: 'A10', referenceCount: 1, partCount: 1, colorCount: 1 },
+    { location: 'C2', referenceCount: 3, partCount: 2, colorCount: 2 }
+  ]);
+});
+test('déplace plusieurs références et détecte une case vidée', () => {
+  const result = moveStorageMappings([
+    { partNum: '3001', colorId: 1, location: 'C2' },
+    { partNum: '3002', colorId: 2, location: 'C2' },
+    { partNum: '3003', colorId: 3, location: 'D4' }
+  ], { fromLocation: 'C2', toLocation: 'E1', items: [{ partNum: '3001', colorId: 1 }, { partNum: '3002', colorId: 2 }] });
+  assert.equal(result.sourceEmpty, true);
+  assert.deepEqual(result.mappings.map(item => item.location), ['E1', 'E1', 'D4']);
+  assert.deepEqual(result.moved.map(item => [item.fromLocation, item.toLocation]), [['C2', 'E1'], ['C2', 'E1']]);
 });
 test('conserve la version inventory demandée dans le lien', () => {
   assert.equal(inventoryFromUrl('https://rebrickable.com/sets/21309-1/name/?_=123&inventory=1#parts'), 1);
