@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, storageBackupPayload, validateStorageBackup, splitCaseAdvice, completedWithChange } = require('../server');
+const { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, prepareRebrickableLocationUpdate, verifyRebrickableLocationUpdate, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, storageBackupPayload, validateStorageBackup, splitCaseAdvice, completedWithChange } = require('../server');
 const { pieceDifficulty, shapeKey, buildStoragePlan } = require('../public/planner');
 
 test('extrait le numéro depuis une URL Rebrickable', () => assert.equal(cleanSetNumber('https://rebrickable.com/sets/21309-1/nasa/#parts'), '21309-1'));
@@ -10,6 +10,39 @@ test('reconnaît un lien de MOC avec son slug', () => assert.deepEqual(cleanMode
 test('interprète la colonne Color Rebrickable comme un identifiant numérique', () => {
   const [part] = mappingsFromCsv('Part,Color,Quantity,Notes,Location,IsUsed\n3707,0,8,,C2,False\n');
   assert.deepEqual(part, { partNum: '3707', colorId: 0, colorName: '', quantity: 8, location: 'C2' });
+});
+test('prépare uniquement les Location différentes déjà présentes sur Rebrickable', () => {
+  const csv = 'Part,Color,Quantity,Notes,Location,IsUsed\n3001,4,12,,A1,False\n3002,1,7,,B1,False\n3003,2,3,,,False\n';
+  const plan = prepareRebrickableLocationUpdate(csv, [
+    { partNum: '3001', colorId: 4, location: 'C2' },
+    { partNum: '3002', colorId: 1, location: 'B1' },
+    { partNum: '9999', colorId: 0, location: 'D4' }
+  ]);
+  assert.equal(plan.ready, true);
+  assert.equal(plan.targetCount, 1);
+  assert.equal(plan.alreadyCorrect, 1);
+  assert.equal(plan.missingCount, 1);
+  assert.deepEqual(plan.targets[0], { partNum: '3001', colorId: 4, colorName: '', beforeLocation: 'A1', expectedLocation: 'C2' });
+});
+test('valide une synchronisation qui ne modifie que les Location attendues', () => {
+  const before = 'Part,Color,Quantity,Notes,Location,IsUsed\n3001,4,12,,A1,False\n3002,1,7,,B1,False\n3003,2,3,,,False\n';
+  const after = 'Part,Color,Quantity,Notes,Location,IsUsed\n3001,4,12,,C2,False\n3002,1,7,,B1,False\n3003,2,3,,,False\n';
+  const report = verifyRebrickableLocationUpdate(before, after, [
+    { partNum: '3001', colorId: 4, location: 'C2' },
+    { partNum: '3002', colorId: 1, location: 'B1' }
+  ]);
+  assert.equal(report.safe, true);
+  assert.equal(report.expectedChanges, 1);
+  assert.equal(report.verifiedChanges, 1);
+  assert.equal(Object.values(report.issueCounts).reduce((sum, value) => sum + value, 0), 0);
+});
+test('refuse une synchronisation qui touche une quantité ou une autre Location', () => {
+  const before = 'Part,Color,Quantity,Notes,Location,IsUsed\n3001,4,12,,A1,False\n3002,1,7,,B1,False\n';
+  const after = 'Part,Color,Quantity,Notes,Location,IsUsed\n3001,4,13,,C2,False\n3002,1,7,,Z9,False\n';
+  const report = verifyRebrickableLocationUpdate(before, after, [{ partNum: '3001', colorId: 4, location: 'C2' }]);
+  assert.equal(report.safe, false);
+  assert.equal(report.issueCounts.fieldChanges, 1);
+  assert.equal(report.issueCounts.unexpectedLocations, 1);
 });
 test('sauvegarde les cases, l’historique et les attributions sans identifiants', () => {
   const backup = storageBackupPayload({

@@ -18,7 +18,7 @@ Une pièce sans emplacement peut recevoir une case directement dans le résultat
 
 Chaque pièce ou étape entière peut être cochée comme rangée. **Tout décocher** remet le modèle à zéro. La progression est pondérée par la quantité réelle et sauvegardée dans `progress.local.json`, afin d’être partagée entre le PC et le téléphone. Les cases terminées quittent le plan actif mais restent accessibles dans **Rangées** pour corriger une erreur.
 
-Le module Chrome 3.5 synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant lors de son premier chargement et le conserve dans `set-inventories.local.json`. Il n’est pas nécessaire de relancer l’extension entre deux recherches ; son bouton **Actualiser** ne sert qu’après une mise à jour de son code.
+Le module Chrome 3.6 synchronise automatiquement la part list `108467` dès qu’une page Rebrickable est ouverte. Un lien de set contenant `inventory=N` ou un lien de MOC déclenche l’export exact correspondant lors de son premier chargement et le conserve dans `set-inventories.local.json`. Il n’est pas nécessaire de relancer l’extension entre deux recherches ; son bouton **Actualiser** ne sert qu’après une mise à jour de son code.
 
 ## Gestion des cases
 
@@ -30,7 +30,9 @@ Le bouton **Actualiser depuis Rebrickable** relit la part list depuis Chrome. Le
 
 Les boutons **Sauvegarder** et **Restaurer** utilisent un fichier JSON propre à LEGO Rangement. Il contient les emplacements courants, les cases d’origine et finales de l’historique ainsi que les attributions manuelles. Il ne contient ni clé API, ni jeton, ni mot de passe. Avant chaque restauration, le serveur conserve aussi automatiquement l’état précédent dans `storage-before-restore.local.json`.
 
-Il n’existe plus de parcours d’export puis de réimport vers Rebrickable : l’import Rebrickable peut normaliser certaines variantes de moules et fusionner des références. Les modifications de `Location` sont donc volontairement gérées uniquement par l’application.
+Le bouton **Appliquer les cases sur Rebrickable** compare d’abord un export complet avec les cases de l’application. L’extension parcourt ensuite toute la pagination, associe chaque combinaison pièce/couleur à son identifiant interne et prépare son formulaire individuel avant la première écriture. Elle ne modifie que `Location`. Un second export complet vérifie ensuite que les références, couleurs, quantités, notes, états, autocollants et emplacements non ciblés sont inchangés. Si une opération est interrompue, l’historique reste intact et le bouton reprend uniquement les différences restantes.
+
+Il n’existe plus de parcours d’export puis de réimport vers Rebrickable : l’import Rebrickable peut normaliser certaines variantes de moules et fusionner des références. La mise à jour passe uniquement par les formulaires individuels du site et par une vérification avant/après.
 
 Les cases libres sont calculées dans le référentiel fixe des rangements existants : `1` à `3`, puis `A1` à `A9` jusqu’à `AB1` à `AB9`. Elles sont recalculées après chaque déplacement ou restauration. Les images exactes de chaque couleur sont chargées progressivement puis mises en cache localement.
 

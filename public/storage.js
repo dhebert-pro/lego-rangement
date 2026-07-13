@@ -15,6 +15,7 @@ let currentCase = '';
 let currentItems = [];
 let currentAdvice = null;
 let extensionReady = false;
+let locationApplyReady = false;
 const pendingExtensionSync = new Map();
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
@@ -29,12 +30,23 @@ async function request(url, options) {
 window.addEventListener('message', event => {
   const message = event.data;
   if (event.source !== window || message?.source !== 'LEGO_RANGEMENT_EXTENSION') return;
-  if (message.type === 'READY') {
-    extensionReady = true;
-    document.querySelector('#resyncLocations').disabled = false;
+  if (message.type === 'APPLY_LOCATIONS_PROGRESS') {
+    const suffix = message.total ? ` (${message.current}/${message.total})` : '';
+    caseStatus.textContent = `${message.message || 'Mise à jour Rebrickable…'}${suffix}`;
+    document.querySelector('#applyRebrickableLocations').textContent = message.total ? `${message.current}/${message.total}` : 'Vérification…';
     return;
   }
-  if (message.type !== 'SYNC_RESULT') return;
+  if (message.type === 'READY') {
+    extensionReady = true;
+    locationApplyReady = String(message.version || '').localeCompare('3.6.0', undefined, { numeric: true }) >= 0;
+    document.querySelector('#resyncLocations').disabled = false;
+    const applyButton = document.querySelector('#applyRebrickableLocations');
+    applyButton.disabled = !locationApplyReady;
+    applyButton.textContent = locationApplyReady ? 'Appliquer les cases sur Rebrickable' : 'Actualiser l’extension 3.6.0';
+    applyButton.title = locationApplyReady ? '' : 'Actualisez l’extension LEGO Rangement 3.6.0 dans chrome://extensions.';
+    return;
+  }
+  if (!['SYNC_RESULT', 'APPLY_LOCATIONS_RESULT'].includes(message.type)) return;
   const pending = pendingExtensionSync.get(message.requestId);
   if (!pending) return;
   pendingExtensionSync.delete(message.requestId);
@@ -54,6 +66,33 @@ function syncLocationsViaExtension() {
       reject(new Error('Le module Chrome n’a pas répondu.'));
     }, 45000);
   });
+}
+
+function applyLocationsViaExtension() {
+  if (!extensionReady || !locationApplyReady) return Promise.reject(new Error('Actualisez l’extension LEGO Rangement 3.6.0 depuis chrome://extensions.'));
+  return new Promise((resolve, reject) => {
+    const requestId = `${Date.now()}-${Math.random()}`;
+    pendingExtensionSync.set(requestId, { resolve, reject });
+    window.postMessage({ source: 'LEGO_RANGEMENT_APP', type: 'APPLY_LOCATIONS', requestId }, location.origin);
+    setTimeout(() => {
+      if (!pendingExtensionSync.has(requestId)) return;
+      pendingExtensionSync.delete(requestId);
+      reject(new Error('La mise à jour Rebrickable n’a pas répondu dans le délai de quinze minutes. Relancez le bouton : les lignes déjà correctes seront ignorées.'));
+    }, 900000);
+  });
+}
+
+function renderRebrickableReport(report) {
+  const container = document.querySelector('#rebrickableReport');
+  const issueTotal = Object.values(report.issueCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  const details = Object.entries(report.issueCounts || {}).filter(([, count]) => count).map(([name, count]) => `<span>${escapeHtml(name)} : <b>${count}</b></span>`).join('');
+  container.innerHTML = `<article class="${report.safe ? 'rebrickable-report-success' : 'rebrickable-report-failure'}">
+    <strong>${report.safe ? '✓ Vérification Rebrickable réussie' : '! Vérification Rebrickable incomplète'}</strong>
+    <p>${report.safe
+      ? `${report.verifiedChanges} changement${report.verifiedChanges === 1 ? '' : 's'} de case vérifié${report.verifiedChanges === 1 ? '' : 's'} ; les ${report.beforeRows} lignes et tous les autres champs sont inchangés.`
+      : `${report.verifiedChanges || 0} changement${report.verifiedChanges === 1 ? '' : 's'} vérifié${report.verifiedChanges === 1 ? '' : 's'}, ${issueTotal} anomalie${issueTotal === 1 ? '' : 's'} détectée${issueTotal === 1 ? '' : 's'}. Relancez le bouton après avoir lu le détail.`}</p>
+    <div>${details}${report.missingCount ? `<span>Absentes de la liste : <b>${report.missingCount}</b></span>` : ''}${report.operationError ? `<span class="report-operation-error">${escapeHtml(report.operationError)}</span>` : ''}</div>
+  </article>`;
 }
 
 function updateSelection() {
@@ -295,6 +334,27 @@ document.querySelector('#resyncLocations').addEventListener('click', async event
   } finally {
     button.disabled = !extensionReady;
     button.textContent = 'Actualiser depuis Rebrickable';
+  }
+});
+
+document.querySelector('#applyRebrickableLocations').addEventListener('click', async event => {
+  if (!confirm('Appliquer sur la liste Rebrickable 108467 toutes les cases actuellement enregistrées dans LEGO Rangement ? L’extension vérifiera l’intégralité de la liste après la modification.')) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Préparation et vérification…';
+  document.querySelector('#rebrickableReport').innerHTML = '';
+  caseStatus.textContent = 'Comparaison complète, contrôle des formulaires, mise à jour des Location puis nouvel export de vérification… Cette opération peut durer plusieurs minutes.';
+  try {
+    const report = await applyLocationsViaExtension();
+    renderRebrickableReport(report);
+    caseStatus.textContent = report.safe
+      ? `Rebrickable est à jour : ${report.verifiedChanges} changement${report.verifiedChanges === 1 ? '' : 's'} vérifié${report.verifiedChanges === 1 ? '' : 's'}, aucun autre champ modifié.`
+      : 'La vérification n’est pas parfaite. L’historique a été conservé et un nouvel appui reprendra uniquement les différences restantes.';
+  } catch (error) {
+    caseStatus.textContent = error.message;
+  } finally {
+    button.disabled = !locationApplyReady;
+    button.textContent = 'Appliquer les cases sur Rebrickable';
   }
 });
 

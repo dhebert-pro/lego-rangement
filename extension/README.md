@@ -9,4 +9,4 @@
 
 Le module ouvre **Export Parts**, sélectionne **Rebrickable CSV**, reproduit la soumission du formulaire (GET ou POST avec ses champs), puis transmet le CSV à l’application locale sans parcourir les tuiles ni la pagination. Il sait aussi lire l’inventaire d’une révision précise de set ou d’un MOC.
 
-L’extension transmet uniquement le contenu des exports CSV à `http://localhost:3000`. Elle ne lit ni ne stocke les identifiants Rebrickable et ne modifie aucune liste sur Rebrickable. Les changements de case restent dans LEGO Rangement.
+L’extension transmet les exports CSV à `http://localhost:3000` et ne lit ni ne stocke les identifiants Rebrickable. Depuis **Gérer les cases**, le bouton **Appliquer les cases sur Rebrickable** peut modifier les formulaires individuels de la liste `108467`. Chaque pièce/couleur et chaque champ `Location` sont contrôlés avant l’écriture, puis un nouvel export complet vérifie le résultat et l’absence de toute autre modification.

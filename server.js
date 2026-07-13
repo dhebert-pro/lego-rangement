@@ -15,6 +15,7 @@ const SET_INVENTORIES_PATH = path.join(__dirname, 'set-inventories.local.json');
 const MOVE_HISTORY_PATH = path.join(__dirname, 'move-history.local.json');
 const LOCATION_OVERRIDES_PATH = path.join(__dirname, 'location-overrides.local.json');
 const STORAGE_RESTORE_SNAPSHOT_PATH = path.join(__dirname, 'storage-before-restore.local.json');
+const REBRICKABLE_LOCATION_SYNC_PATH = path.join(__dirname, 'rebrickable-location-sync.local.json');
 const PART_CATALOG_PATH = path.join(__dirname, 'part-catalog.local.json');
 const COLOR_IMAGES_PATH = path.join(__dirname, 'color-images.local.json');
 const LDRAW_DIMENSIONS_PATH = path.join(__dirname, 'data', 'ldraw-dimensions.json');
@@ -355,6 +356,127 @@ function mappingsFromCsv(content) {
   }).filter(item => item.partNum && item.location);
   if (!mappings.length) throw new Error('Aucun emplacement renseigné trouvé dans ce CSV.');
   return mappings;
+}
+
+function rebrickableLocationTable(content) {
+  const rows = parseCsv(String(content || ''));
+  if (rows.length < 2) throw new Error('L’export Rebrickable est vide.');
+  const rawHeaders = rows[0].map(value => String(value || '').replace(/^\uFEFF/, '').trim());
+  const headers = rawHeaders.map(normalized);
+  const indexOf = aliases => headers.findIndex(header => aliases.includes(header));
+  const partIndex = indexOf(['part', 'partnum', 'partnumber', 'designid']);
+  const colorIdIndex = indexOf(['colorid', 'colourid', 'rebrickablecolorid', 'rbcolorid']);
+  const colorIndex = indexOf(['color', 'colour', 'colorname', 'colourname', 'couleur']);
+  const locationIndex = indexOf(['location', 'storagelocation', 'emplacement', 'case', 'bin', 'drawer']);
+  if (partIndex < 0 || colorIndex < 0 || locationIndex < 0) throw new Error('L’export Rebrickable ne contient pas les colonnes Part, Color et Location attendues.');
+  const records = rows.slice(1).map((sourceRow, index) => {
+    const row = [...sourceRow];
+    while (row.length < headers.length) row.push('');
+    const explicitColorId = colorIdIndex >= 0 ? String(row[colorIdIndex] || '').trim() : '';
+    const colorValue = String(row[colorIndex] || '').trim();
+    const numericColor = explicitColorId || (/^-?\d+$/.test(colorValue) ? colorValue : '');
+    const item = {
+      partNum: String(row[partIndex] || '').trim(),
+      colorId: /^-?\d+$/.test(numericColor) ? Number(numericColor) : null,
+      colorName: numericColor ? '' : colorValue
+    };
+    const values = {};
+    headers.forEach((header, columnIndex) => { values[header] = String(row[columnIndex] ?? ''); });
+    return { rowNumber: index + 2, item, identity: mappingIdentity(item), location: String(row[locationIndex] || '').trim(), values };
+  }).filter(record => record.item.partNum);
+  const byIdentity = new Map();
+  records.forEach(record => {
+    if (!byIdentity.has(record.identity)) byIdentity.set(record.identity, []);
+    byIdentity.get(record.identity).push(record);
+  });
+  return { headers, rawHeaders, locationHeader: headers[locationIndex], records, byIdentity };
+}
+
+function prepareRebrickableLocationUpdate(content, mappings) {
+  const table = rebrickableLocationTable(content);
+  const targets = [];
+  const missing = [];
+  const conflicts = [];
+  let alreadyCorrect = 0;
+  for (const mapping of mappings || []) {
+    if (!mapping?.partNum || mapping.colorId == null || !String(mapping.location || '').trim() || /^sans case$/i.test(String(mapping.location).trim())) continue;
+    const identity = mappingIdentity(mapping);
+    const records = table.byIdentity.get(identity) || [];
+    if (!records.length) {
+      missing.push({ partNum: mapping.partNum, colorId: mapping.colorId, colorName: mapping.colorName || '', expectedLocation: mapping.location });
+      continue;
+    }
+    if (records.length !== 1) {
+      conflicts.push({ partNum: mapping.partNum, colorId: mapping.colorId, reason: `${records.length} lignes Rebrickable correspondent à cette pièce/couleur.` });
+      continue;
+    }
+    const record = records[0];
+    const expectedLocation = String(mapping.location).trim();
+    if (record.location === expectedLocation) alreadyCorrect += 1;
+    else targets.push({ partNum: mapping.partNum, colorId: Number(mapping.colorId), colorName: mapping.colorName || '', beforeLocation: record.location, expectedLocation });
+  }
+  return {
+    ready: conflicts.length === 0,
+    totalRows: table.records.length,
+    targetCount: targets.length,
+    alreadyCorrect,
+    missingCount: missing.length,
+    conflictCount: conflicts.length,
+    targets,
+    missing: missing.slice(0, 100),
+    conflicts: conflicts.slice(0, 100)
+  };
+}
+
+function verifyRebrickableLocationUpdate(beforeContent, afterContent, mappings) {
+  const before = rebrickableLocationTable(beforeContent);
+  const after = rebrickableLocationTable(afterContent);
+  const localLocations = new Map((mappings || []).filter(item => item?.partNum && item.colorId != null && String(item.location || '').trim() && !/^sans case$/i.test(String(item.location).trim()))
+    .map(item => [mappingIdentity(item), String(item.location).trim()]));
+  const issues = { schema: [], missing: [], extra: [], fieldChanges: [], wrongLocations: [], unexpectedLocations: [], duplicates: [] };
+  if (before.headers.join('|') !== after.headers.join('|')) issues.schema.push('Les colonnes de l’export ont changé pendant la synchronisation.');
+  const duplicateKeys = new Set([...before.byIdentity, ...after.byIdentity].filter(([, records]) => records.length !== 1).map(([identity]) => identity));
+  duplicateKeys.forEach(identity => issues.duplicates.push({ identity }));
+  let expectedChanges = 0;
+  let verifiedChanges = 0;
+  for (const beforeRecord of before.records) {
+    if (duplicateKeys.has(beforeRecord.identity)) continue;
+    const afterRecords = after.byIdentity.get(beforeRecord.identity) || [];
+    if (!afterRecords.length) {
+      issues.missing.push({ partNum: beforeRecord.item.partNum, colorId: beforeRecord.item.colorId });
+      continue;
+    }
+    const afterRecord = afterRecords[0];
+    const fields = [...new Set([...before.headers, ...after.headers])].filter(field => field !== before.locationHeader && field !== after.locationHeader)
+      .filter(field => String(beforeRecord.values[field] ?? '') !== String(afterRecord.values[field] ?? ''));
+    if (fields.length) issues.fieldChanges.push({ partNum: beforeRecord.item.partNum, colorId: beforeRecord.item.colorId, fields });
+    if (localLocations.has(beforeRecord.identity)) {
+      const expected = localLocations.get(beforeRecord.identity);
+      if (beforeRecord.location !== expected) expectedChanges += 1;
+      if (afterRecord.location === expected) {
+        if (beforeRecord.location !== expected) verifiedChanges += 1;
+      } else {
+        issues.wrongLocations.push({ partNum: beforeRecord.item.partNum, colorId: beforeRecord.item.colorId, before: beforeRecord.location, expected, actual: afterRecord.location });
+      }
+    } else if (afterRecord.location !== beforeRecord.location) {
+      issues.unexpectedLocations.push({ partNum: beforeRecord.item.partNum, colorId: beforeRecord.item.colorId, before: beforeRecord.location, actual: afterRecord.location });
+    }
+  }
+  for (const afterRecord of after.records) {
+    if (!before.byIdentity.has(afterRecord.identity)) issues.extra.push({ partNum: afterRecord.item.partNum, colorId: afterRecord.item.colorId });
+  }
+  const issueCounts = Object.fromEntries(Object.entries(issues).map(([key, values]) => [key, values.length]));
+  const issueTotal = Object.values(issueCounts).reduce((sum, value) => sum + value, 0);
+  return {
+    safe: issueTotal === 0 && verifiedChanges === expectedChanges,
+    beforeRows: before.records.length,
+    afterRows: after.records.length,
+    expectedChanges,
+    verifiedChanges,
+    issueCounts,
+    issues: Object.fromEntries(Object.entries(issues).map(([key, values]) => [key, values.slice(0, 100)])),
+    truncated: Object.values(issues).some(values => values.length > 100)
+  };
 }
 
 function setPartsFromCsv(content) {
@@ -1376,6 +1498,30 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, assignLocation(JSON.parse(raw || '{}')));
     } catch (error) { return send(res, 400, { error: error.message }); }
   }
+  if (req.method === 'POST' && req.url === '/api/storage/rebrickable-locations/preflight') {
+    try {
+      let raw = ''; for await (const chunk of req) {
+        raw += chunk;
+        if (raw.length > 15_000_000) throw new Error('L’export Rebrickable dépasse la taille maximale autorisée.');
+      }
+      const input = JSON.parse(raw || '{}');
+      const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+      return send(res, 200, prepareRebrickableLocationUpdate(input.content, mappings));
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
+  if (req.method === 'POST' && req.url === '/api/storage/rebrickable-locations/verify') {
+    try {
+      let raw = ''; for await (const chunk of req) {
+        raw += chunk;
+        if (raw.length > 30_000_000) throw new Error('Les exports Rebrickable dépassent la taille maximale autorisée.');
+      }
+      const input = JSON.parse(raw || '{}');
+      const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
+      const report = { ...verifyRebrickableLocationUpdate(input.beforeContent, input.afterContent, mappings), checkedAt: new Date().toISOString() };
+      fs.writeFileSync(REBRICKABLE_LOCATION_SYNC_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+      return send(res, 200, report);
+    } catch (error) { return send(res, 400, { error: error.message }); }
+  }
   if (req.method === 'GET' && req.url === '/api/storage/cases') {
     const mappings = readJson(LOCATIONS_PATH, { mappings: [] }).mappings || [];
     return send(res, 200, { occupied: occupiedCases(mappings), empty: inferredEmptyCases(mappings) });
@@ -1470,4 +1616,4 @@ if (require.main === module) server.listen(PORT, HOST, () => {
   console.log(`LEGO Rangement (PC) : http://localhost:${PORT}`);
   networkUrls().forEach(url => console.log(`LEGO Rangement (téléphone, même Wi-Fi) : ${url}`));
 });
-module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, storageBackupPayload, validateStorageBackup, splitCaseAdvice, completedWithChange, networkUrls, server };
+module.exports = { cleanSetNumber, cleanModel, inventoryFromUrl, mappingsFromCsv, prepareRebrickableLocationUpdate, verifyRebrickableLocationUpdate, setPartsFromCsv, withoutSpares, combineLDrawBounds, physicalFromLDrawBounds, upsertLocationMapping, occupiedCases, storageCaseUniverse, inferredEmptyCases, authoritativeLocationOverrides, moveStorageMappings, moveStorageGroups, consolidateMoveHistory, storageBackupPayload, validateStorageBackup, splitCaseAdvice, completedWithChange, networkUrls, server };

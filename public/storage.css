@@ -8,9 +8,19 @@
 .storage-heading-tools { display: flex; align-items: center; gap: 9px; }
 .storage-heading-tools > span { padding: 5px 10px; border-radius: 99px; background: var(--yellow); font-weight: 850; white-space: nowrap; }
 .storage-heading-tools button { min-height: 42px; padding: 8px 12px; }
+.storage-heading-tools .rebrickable-apply-button { background: var(--green); color: white; }
+.storage-heading-tools .rebrickable-apply-button:disabled { opacity: .45; }
 .storage-source-note { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; margin: -3px 0 16px; padding: 11px 13px; border-left: 5px solid var(--green); border-radius: 6px; background: #edf5f1; }
 .storage-source-note strong { color: #173f2e; }
 .storage-source-note span { color: #58645f; font-size: 12px; }
+.rebrickable-report:not(:empty) { margin: -5px 0 16px; }
+.rebrickable-report article { padding: 12px 14px; border: 2px solid; border-radius: 8px; }
+.rebrickable-report-success { border-color: var(--green); background: #edf8f2; }
+.rebrickable-report-failure { border-color: var(--red); background: #fff0ed; }
+.rebrickable-report p { margin: 4px 0 0; font-size: 12px; }
+.rebrickable-report article > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rebrickable-report article > div span { padding: 4px 7px; border-radius: 99px; background: #ffffffc9; font-size: 11px; }
+.rebrickable-report .report-operation-error { flex-basis: 100%; border-radius: 5px; color: #8f2119; }
 .storage-form { padding: 0; border: 0; box-shadow: none; }
 .storage-form > label { display: block; margin-bottom: 7px; font-weight: 800; }
 .storage-form > div { display: flex; gap: 9px; }
@@ -133,7 +143,7 @@
   .storage-heading-tools { display: grid; grid-template-columns: 1fr 1fr; margin-top: 10px; }
   .storage-heading-tools > span { grid-column: 1 / -1; width: max-content; }
   .storage-heading-tools button { white-space: normal; }
-  #resyncLocations { grid-column: 1 / -1; }
+  #resyncLocations, #applyRebrickableLocations { grid-column: 1 / -1; }
   .storage-source-note { display: block; margin-top: 0; }
   .storage-source-note span { display: block; margin-top: 4px; line-height: 1.35; }
   .section-title h2 { font-size: 22px; }

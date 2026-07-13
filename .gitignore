@@ -6,6 +6,7 @@ set-inventories.local.json
 move-history.local.json
 location-overrides.local.json
 storage-before-restore.local.json
+rebrickable-location-sync.local.json
 part-catalog.local.json
 color-images.local.json
 data/ldraw-complete.zip
